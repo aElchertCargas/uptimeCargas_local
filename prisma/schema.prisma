@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Monitor {
+  id               String     @id @default(cuid())
+  name             String
+  url              String
+  method           String     @default("GET")
+  interval         Int        @default(120)
+  timeout          Int        @default(48)
+  expectedStatus   Int[]      @default([200, 401])
+  maxRetries       Int        @default(3)
+  active           Boolean    @default(true)
+  tags             String[]   @default([])
+  // Materialized stats updated by the check cycle
+  lastStatus       Boolean?
+  lastResponseTime Int?
+  lastCheckedAt    DateTime?
+  uptime24h        Float?
+  avgResponseTime24h Int?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  checks           Check[]
+  incidents        Incident[]
+}
+
+model Check {
+  id           String   @id @default(cuid())
+  monitorId    String
+  monitor      Monitor  @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  status       Int
+  responseTime Int
+  isUp         Boolean
+  message      String?
+  checkedAt    DateTime @default(now())
+
+  @@index([monitorId, checkedAt])
+  @@index([monitorId, checkedAt, isUp])
+  @@index([checkedAt])
+}
+
+model NotificationChannel {
+  id        String   @id @default(cuid())
+  name      String
+  type      String
+  config    Json
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Incident {
+  id         String    @id @default(cuid())
+  monitorId  String
+  monitor    Monitor   @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  startedAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  message    String?
+
+  @@index([monitorId, startedAt])
+}
+
+model ExcludedPattern {
+  id        String   @id @default(cuid())
+  pattern   String   @unique
+  createdAt DateTime @default(now())
+}
+
+model AppSetting {
+  key   String @id
+  value String
+}
