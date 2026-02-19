@@ -13,6 +13,24 @@ interface CheckRecord {
   message: string | null;
 }
 
+async function getAlertDelay(): Promise<number> {
+  const row = await prisma.appSetting.findUnique({
+    where: { key: "alertDelaySeconds" },
+  });
+  return row ? parseInt(row.value, 10) || 300 : 300;
+}
+
+async function sendNotifications(payload: NotificationPayload) {
+  const channels = await prisma.notificationChannel.findMany({
+    where: { enabled: true },
+  });
+  await Promise.allSettled(
+    channels.map((ch) =>
+      dispatchNotification(ch.type, ch.config as Record<string, unknown>, payload)
+    )
+  );
+}
+
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
@@ -68,7 +86,6 @@ export async function POST(request: NextRequest) {
     await prisma.check.createMany({ data: pendingInserts });
   }
 
-  // Update materialized stats on monitors
   const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000);
   const checkedIds = pendingInserts.map((r) => r.monitorId);
 
@@ -110,6 +127,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Handle state transitions: create/resolve incidents
   for (const { monitor, result } of stateChanges) {
     if (!result.isUp) {
       await prisma.incident.create({
@@ -125,32 +143,52 @@ export async function POST(request: NextRequest) {
           where: { id: openIncident.id },
           data: { resolvedAt: new Date() },
         });
+
+        // Only send recovery notification if the down alert was already sent
+        if (openIncident.notifiedAt) {
+          await sendNotifications({
+            monitorName: monitor.name,
+            monitorUrl: monitor.url,
+            status: "up",
+            message: `${monitor.name} is back UP (${result.responseTime}ms)`,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
     }
+  }
 
-    const channels = await prisma.notificationChannel.findMany({
-      where: { enabled: true },
+  // Send delayed down notifications for incidents that have exceeded the alert delay
+  const alertDelay = await getAlertDelay();
+  const delayCutoff = new Date(now - alertDelay * 1000);
+
+  const pendingIncidents = await prisma.incident.findMany({
+    where: {
+      resolvedAt: null,
+      notifiedAt: null,
+      startedAt: { lte: delayCutoff },
+    },
+    include: { monitor: true },
+  });
+
+  for (const incident of pendingIncidents) {
+    await sendNotifications({
+      monitorName: incident.monitor.name,
+      monitorUrl: incident.monitor.url,
+      status: "down",
+      message: `${incident.monitor.name} is DOWN: ${incident.message}`,
+      timestamp: new Date().toISOString(),
     });
 
-    const payload: NotificationPayload = {
-      monitorName: monitor.name,
-      monitorUrl: monitor.url,
-      status: result.isUp ? "up" : "down",
-      message: result.isUp
-        ? `${monitor.name} is back UP (${result.responseTime}ms)`
-        : `${monitor.name} is DOWN: ${result.message}`,
-      timestamp: new Date().toISOString(),
-    };
-
-    await Promise.allSettled(
-      channels.map((ch) =>
-        dispatchNotification(ch.type, ch.config as Record<string, unknown>, payload)
-      )
-    );
+    await prisma.incident.update({
+      where: { id: incident.id },
+      data: { notifiedAt: new Date() },
+    });
   }
 
   return NextResponse.json({
     checked: pendingInserts.length,
+    notified: pendingIncidents.length,
     results: pendingInserts.map((r) => ({
       monitorId: r.monitorId,
       isUp: r.isUp,

@@ -751,6 +751,107 @@ function HeartbeatIntervalSection() {
   );
 }
 
+// ─── Alert Delay Section ─────────────────────────────────────────────────────
+
+function AlertDelaySection() {
+  const queryClient = useQueryClient();
+  const [seconds, setSeconds] = useState("");
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const loaded = !isLoading && settings;
+  const currentDelay = settings?.alertDelaySeconds ?? "300";
+
+  const saveMutation = useMutation({
+    mutationFn: async (alertDelaySeconds: string) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alertDelaySeconds }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success("Alert delay updated");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const handleSave = () => {
+    const val = parseInt(seconds || currentDelay, 10);
+    if (isNaN(val) || val < 0) {
+      toast.error("Enter a non-negative number of seconds");
+      return;
+    }
+    saveMutation.mutate(String(val));
+  };
+
+  const displayMinutes = Math.floor(parseInt(currentDelay, 10) / 60);
+  const displayRemainder = parseInt(currentDelay, 10) % 60;
+  const displayText =
+    displayMinutes > 0
+      ? displayRemainder > 0
+        ? `${displayMinutes}m ${displayRemainder}s`
+        : `${displayMinutes}m`
+      : `${currentDelay}s`;
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">Alert Delay</h2>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Down Alert Threshold</CardTitle>
+          <CardDescription>
+            How long a monitor must be continuously down before a notification is sent. Set to 0 for immediate alerts.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-end gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="alert-delay" className="font-mono">
+                Delay (seconds)
+              </Label>
+              <Input
+                id="alert-delay"
+                type="number"
+                min={0}
+                className="w-32 font-mono"
+                placeholder={loaded ? currentDelay : "300"}
+                value={seconds}
+                onChange={(e) => setSeconds(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button
+              onClick={handleSave}
+              disabled={saveMutation.isPending || isLoading}
+            >
+              {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Save
+            </Button>
+          </div>
+          {loaded && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Currently waiting <span className="font-mono font-medium">{displayText}</span> before sending down alerts.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 // ─── Excluded Patterns Section ───────────────────────────────────────────────
 
 function ExcludedPatternsSection() {
@@ -1289,6 +1390,12 @@ export default function SettingsPage() {
 
       {/* Heartbeat Interval */}
       <HeartbeatIntervalSection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
+
+      {/* Alert Delay */}
+      <AlertDelaySection />
 
       {/* Divider */}
       <div className="border-t border-border" />

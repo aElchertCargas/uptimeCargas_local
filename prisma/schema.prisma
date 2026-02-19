@@ -60,6 +60,7 @@ model Incident {
   monitor    Monitor   @relation(fields: [monitorId], references: [id], onDelete: Cascade)
   startedAt  DateTime  @default(now())
   resolvedAt DateTime?
+  notifiedAt DateTime?
   message    String?
 
   @@index([monitorId, startedAt])

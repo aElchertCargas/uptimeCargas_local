@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 const DEFAULTS: Record<string, string> = {
   retentionDays: "90",
   defaultInterval: "120",
+  alertDelaySeconds: "300",
 };
 
 export async function GET() {
