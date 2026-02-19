@@ -78,18 +78,33 @@ export async function sendPushover(
   }
 }
 
+function toEST(isoTimestamp: string): string {
+  return new Date(isoTimestamp).toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  });
+}
+
 function interpolateTemplate(template: string, payload: NotificationPayload): string {
   return template
     .replace(/\{\{monitorName\}\}/g, payload.monitorName)
     .replace(/\{\{monitorUrl\}\}/g, payload.monitorUrl)
     .replace(/\{\{status\}\}/g, payload.status)
     .replace(/\{\{message\}\}/g, payload.message)
-    .replace(/\{\{timestamp\}\}/g, payload.timestamp);
+    .replace(/\{\{timestamp\}\}/g, toEST(payload.timestamp));
 }
 
 function buildAdaptiveCard(payload: NotificationPayload) {
   const color = payload.status === "down" ? "attention" : "good";
   const icon = payload.status === "down" ? "🔴" : "🟢";
+  const estTime = toEST(payload.timestamp);
 
   return {
     type: "message",
@@ -106,7 +121,6 @@ function buildAdaptiveCard(payload: NotificationPayload) {
               size: "medium",
               weight: "bolder",
               text: `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`,
-              style: color === "attention" ? "default" : "default",
               color,
             },
             {
@@ -115,7 +129,7 @@ function buildAdaptiveCard(payload: NotificationPayload) {
                 { title: "Monitor", value: payload.monitorName },
                 { title: "URL", value: payload.monitorUrl },
                 { title: "Status", value: payload.status.toUpperCase() },
-                { title: "Time", value: payload.timestamp },
+                { title: "Time", value: estTime },
               ],
             },
             {
