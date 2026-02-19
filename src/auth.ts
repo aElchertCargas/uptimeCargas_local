@@ -15,6 +15,7 @@ const users = [
 ];
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: true, // Trust Railway and other deployment platforms
   providers: [
     Credentials({
       name: "Credentials",
