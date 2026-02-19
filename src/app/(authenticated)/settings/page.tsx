@@ -41,10 +41,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 // ─── Notification Channel Types ──────────────────────────────────────────────
 
-type NotificationChannelType = "webhook" | "pushover";
+type NotificationChannelType = "webhook" | "pushover" | "teams";
 
 interface WebhookConfig {
   url: string;
@@ -58,12 +59,20 @@ interface PushoverConfig {
   device?: string;
 }
 
+interface TeamsConfig {
+  url: string;
+  bodyType: "adaptive-card" | "custom";
+  customBody?: string;
+  headers?: Record<string, string>;
+}
+
 interface NotificationChannel {
   id: string;
   name: string;
   type: NotificationChannelType;
-  config: WebhookConfig | PushoverConfig;
+  config: WebhookConfig | PushoverConfig | TeamsConfig;
   enabled: boolean;
+  isDefault: boolean;
   createdAt: string;
 }
 
@@ -94,8 +103,9 @@ async function fetchChannels(): Promise<NotificationChannel[]> {
 async function createChannel(data: {
   name: string;
   type: NotificationChannelType;
-  config: WebhookConfig | PushoverConfig;
+  config: WebhookConfig | PushoverConfig | TeamsConfig;
   enabled: boolean;
+  isDefault?: boolean;
 }): Promise<NotificationChannel> {
   const res = await fetch("/api/notifications", {
     method: "POST",
@@ -147,6 +157,22 @@ async function fetchPatterns(): Promise<ExcludedPattern[]> {
 
 // ─── Channel Form ────────────────────────────────────────────────────────────
 
+const DEFAULT_TEAMS_BODY = `{
+  "type": "message",
+  "attachments": [{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "content": {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        { "type": "TextBlock", "weight": "bolder", "text": "{{monitorName}} is {{status}}" },
+        { "type": "TextBlock", "text": "{{message}}", "wrap": true }
+      ]
+    }
+  }]
+}`;
+
 function ChannelForm({
   channel,
   onSuccess,
@@ -164,11 +190,14 @@ function ChannelForm({
     channel?.type ?? "webhook"
   );
   const [enabled, setEnabled] = useState(channel?.enabled ?? true);
+  const [isDefault, setIsDefault] = useState(channel?.isDefault ?? false);
 
+  // Webhook fields
   const [url, setUrl] = useState(
     (channel?.type === "webhook" ? (channel.config as WebhookConfig).url : "") ?? ""
   );
 
+  // Pushover fields
   const [userKey, setUserKey] = useState(
     (channel?.type === "pushover"
       ? (channel.config as PushoverConfig).userKey
@@ -197,6 +226,19 @@ function ChannelForm({
       : "") ?? ""
   );
 
+  // Teams fields
+  const teamsConfig = channel?.type === "teams" ? (channel.config as TeamsConfig) : null;
+  const [teamsUrl, setTeamsUrl] = useState(teamsConfig?.url ?? "");
+  const [teamsBodyType, setTeamsBodyType] = useState<"adaptive-card" | "custom">(
+    teamsConfig?.bodyType ?? "adaptive-card"
+  );
+  const [teamsCustomBody, setTeamsCustomBody] = useState(
+    teamsConfig?.customBody ?? DEFAULT_TEAMS_BODY
+  );
+  const [teamsHeaders, setTeamsHeaders] = useState(
+    teamsConfig?.headers ? JSON.stringify(teamsConfig.headers, null, 2) : ""
+  );
+
   const createMutation = useMutation({
     mutationFn: createChannel,
     onSuccess: () => {
@@ -220,30 +262,55 @@ function ChannelForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const config =
-      type === "webhook"
-        ? { url }
-        : {
-            userKey,
-            appToken,
-            priority: parseInt(priority, 10),
-            ...(sound && { sound }),
-            ...(device && { device }),
-          };
 
-    if (type === "webhook" && !url.trim()) {
-      toast.error("URL is required");
-      return;
-    }
-    if (type === "pushover" && (!userKey.trim() || !appToken.trim())) {
-      toast.error("User Key and App Token are required");
-      return;
+    let config: WebhookConfig | PushoverConfig | TeamsConfig;
+
+    if (type === "webhook") {
+      if (!url.trim()) { toast.error("URL is required"); return; }
+      config = { url };
+    } else if (type === "pushover") {
+      if (!userKey.trim() || !appToken.trim()) {
+        toast.error("User Key and App Token are required");
+        return;
+      }
+      config = {
+        userKey,
+        appToken,
+        priority: parseInt(priority, 10),
+        ...(sound && { sound }),
+        ...(device && { device }),
+      };
+    } else {
+      if (!teamsUrl.trim()) { toast.error("Webhook URL is required"); return; }
+      let parsedHeaders: Record<string, string> | undefined;
+      if (teamsHeaders.trim()) {
+        try {
+          parsedHeaders = JSON.parse(teamsHeaders);
+        } catch {
+          toast.error("Headers must be valid JSON");
+          return;
+        }
+      }
+      if (teamsBodyType === "custom" && teamsCustomBody.trim()) {
+        try {
+          JSON.parse(teamsCustomBody);
+        } catch {
+          toast.error("Custom body must be valid JSON");
+          return;
+        }
+      }
+      config = {
+        url: teamsUrl,
+        bodyType: teamsBodyType,
+        ...(teamsBodyType === "custom" && teamsCustomBody && { customBody: teamsCustomBody }),
+        ...(parsedHeaders && { headers: parsedHeaders }),
+      };
     }
 
     if (isEditing && channel) {
       updateMutation.mutate({
         id: channel.id,
-        data: { name: name.trim(), type, config, enabled },
+        data: { name: name.trim(), type, config, enabled, isDefault },
       });
     } else {
       createMutation.mutate({
@@ -251,6 +318,7 @@ function ChannelForm({
         type,
         config,
         enabled,
+        isDefault,
       });
     }
   };
@@ -265,7 +333,7 @@ function ChannelForm({
           id="channel-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Slack Alerts"
+          placeholder="e.g. Teams Alerts"
           required
         />
       </div>
@@ -283,6 +351,7 @@ function ChannelForm({
           <SelectContent>
             <SelectItem value="webhook">Webhook</SelectItem>
             <SelectItem value="pushover">Pushover</SelectItem>
+            <SelectItem value="teams">Microsoft Teams</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -356,9 +425,70 @@ function ChannelForm({
         </>
       )}
 
-      <div className="flex items-center gap-2">
-        <Switch id="form-enabled" checked={enabled} onCheckedChange={setEnabled} />
-        <Label htmlFor="form-enabled">Enabled</Label>
+      {type === "teams" && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="teams-url">Webhook URL</Label>
+            <Input
+              id="teams-url"
+              type="url"
+              value={teamsUrl}
+              onChange={(e) => setTeamsUrl(e.target.value)}
+              placeholder="https://outlook.office.com/webhook/..."
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Request Body Type</Label>
+            <Select
+              value={teamsBodyType}
+              onValueChange={(v) => setTeamsBodyType(v as "adaptive-card" | "custom")}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="adaptive-card">Adaptive Card (default)</SelectItem>
+                <SelectItem value="custom">Custom Body</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {teamsBodyType === "custom" && (
+            <div className="space-y-2">
+              <Label htmlFor="teams-body">Custom HTTP Body (JSON)</Label>
+              <Textarea
+                id="teams-body"
+                value={teamsCustomBody}
+                onChange={(e) => setTeamsCustomBody(e.target.value)}
+                placeholder={DEFAULT_TEAMS_BODY}
+                className="min-h-[160px] font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Available placeholders: {"{{monitorName}}"}, {"{{monitorUrl}}"}, {"{{status}}"}, {"{{message}}"}, {"{{timestamp}}"}
+              </p>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="teams-headers">Custom Headers (JSON, optional)</Label>
+            <Textarea
+              id="teams-headers"
+              value={teamsHeaders}
+              onChange={(e) => setTeamsHeaders(e.target.value)}
+              placeholder={'{\n  "X-Custom-Header": "value"\n}'}
+              className="min-h-[80px] font-mono text-xs"
+            />
+          </div>
+        </>
+      )}
+
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Switch id="form-enabled" checked={enabled} onCheckedChange={setEnabled} />
+          <Label htmlFor="form-enabled">Enabled</Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch id="form-default" checked={isDefault} onCheckedChange={setIsDefault} />
+          <Label htmlFor="form-default">Default channel</Label>
+        </div>
       </div>
 
       <DialogFooter className="gap-2 sm:gap-0 pt-4">
@@ -421,6 +551,22 @@ function DeleteConfirmDialog({
 
 // ─── Channel Card ────────────────────────────────────────────────────────────
 
+function getChannelDescription(channel: NotificationChannel): string {
+  switch (channel.type) {
+    case "webhook":
+      return (channel.config as WebhookConfig).url;
+    case "pushover":
+      return `User: ${(channel.config as PushoverConfig).userKey.slice(0, 8)}…`;
+    case "teams": {
+      const tc = channel.config as TeamsConfig;
+      const bodyLabel = tc.bodyType === "custom" ? "Custom body" : "Adaptive Card";
+      return `${bodyLabel} → ${tc.url.slice(0, 50)}…`;
+    }
+    default:
+      return "";
+  }
+}
+
 function ChannelCard({ channel }: { channel: NotificationChannel }) {
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
@@ -455,13 +601,14 @@ function ChannelCard({ channel }: { channel: NotificationChannel }) {
           <div className="flex items-center gap-2 flex-wrap">
             <CardTitle className="text-base truncate">{channel.name}</CardTitle>
             <Badge variant="secondary" className="font-mono text-xs capitalize">
-              {channel.type}
+              {channel.type === "teams" ? "Teams" : channel.type}
             </Badge>
+            {channel.isDefault && (
+              <Badge className="text-xs">Default</Badge>
+            )}
           </div>
-          <CardDescription className="mt-1 text-xs font-mono">
-            {channel.type === "webhook"
-              ? (channel.config as WebhookConfig).url
-              : `User: ${(channel.config as PushoverConfig).userKey.slice(0, 8)}…`}
+          <CardDescription className="mt-1 text-xs font-mono truncate">
+            {getChannelDescription(channel)}
           </CardDescription>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -493,7 +640,7 @@ function ChannelCard({ channel }: { channel: NotificationChannel }) {
               Edit
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Channel</DialogTitle>
               <DialogDescription>
@@ -1335,7 +1482,7 @@ export default function SettingsPage() {
               Add Channel
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add Channel</DialogTitle>
               <DialogDescription>

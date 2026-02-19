@@ -12,12 +12,20 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
+  if (body.isDefault) {
+    await prisma.notificationChannel.updateMany({
+      where: { isDefault: true },
+      data: { isDefault: false },
+    });
+  }
+
   const channel = await prisma.notificationChannel.create({
     data: {
       name: body.name,
       type: body.type,
       config: body.config,
       enabled: body.enabled ?? true,
+      isDefault: body.isDefault ?? false,
     },
   });
 

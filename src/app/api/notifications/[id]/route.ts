@@ -8,6 +8,13 @@ export async function PUT(
   const { id } = await params;
   const body = await request.json();
 
+  if (body.isDefault === true) {
+    await prisma.notificationChannel.updateMany({
+      where: { isDefault: true, id: { not: id } },
+      data: { isDefault: false },
+    });
+  }
+
   const channel = await prisma.notificationChannel.update({
     where: { id },
     data: {
@@ -15,6 +22,7 @@ export async function PUT(
       ...(body.type !== undefined && { type: body.type }),
       ...(body.config !== undefined && { config: body.config }),
       ...(body.enabled !== undefined && { enabled: body.enabled }),
+      ...(body.isDefault !== undefined && { isDefault: body.isDefault }),
     },
   });
 
