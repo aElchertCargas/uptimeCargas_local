@@ -10,6 +10,8 @@ import {
   Send,
   Loader2,
   X,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import {
   Card,
@@ -892,6 +894,314 @@ function ExcludedPatternsSection() {
   );
 }
 
+// ─── User Types & Helpers ────────────────────────────────────────────────────
+
+interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+async function fetchUsers(): Promise<AppUser[]> {
+  const res = await fetch("/api/users");
+  if (!res.ok) throw new Error("Failed to fetch users");
+  return res.json();
+}
+
+// ─── User Form ──────────────────────────────────────────────────────────────
+
+function UserForm({
+  user,
+  onSuccess,
+  onCancel,
+}: {
+  user?: AppUser | null;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const isEditing = !!user;
+
+  const [name, setName] = useState(user?.name ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [password, setPassword] = useState("");
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { name: string; email: string; password: string }) => {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to create user");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User created");
+      onSuccess();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Record<string, string> }) => {
+      const res = await fetch(`/api/users/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update user");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User updated");
+      onSuccess();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim()) {
+      toast.error("Name and email are required");
+      return;
+    }
+    if (!isEditing && !password) {
+      toast.error("Password is required for new users");
+      return;
+    }
+    if (password && password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+
+    if (isEditing && user) {
+      const data: Record<string, string> = { name: name.trim(), email: email.trim() };
+      if (password) data.password = password;
+      updateMutation.mutate({ id: user.id, data });
+    } else {
+      createMutation.mutate({ name: name.trim(), email: email.trim(), password });
+    }
+  };
+
+  const pending = createMutation.isPending || updateMutation.isPending;
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="user-name">Name</Label>
+        <Input
+          id="user-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="John Doe"
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="user-email">Email</Label>
+        <Input
+          id="user-email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="user@company.com"
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="user-password">
+          {isEditing ? "New Password (leave blank to keep current)" : "Password"}
+        </Label>
+        <Input
+          id="user-password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={isEditing ? "••••••" : "Min 6 characters"}
+          required={!isEditing}
+        />
+      </div>
+      <DialogFooter className="gap-2 sm:gap-0 pt-4">
+        <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={pending}>
+          {pending && <Loader2 className="size-4 animate-spin" />}
+          {isEditing ? "Save" : "Add User"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+// ─── User Management Section ────────────────────────────────────────────────
+
+function UserManagementSection() {
+  const queryClient = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+  const [editUser, setEditUser] = useState<AppUser | null>(null);
+  const [deleteUser, setDeleteUser] = useState<AppUser | null>(null);
+
+  const { data: users, isLoading } = useQuery({
+    queryKey: ["users"],
+    queryFn: fetchUsers,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to delete user");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User deleted");
+      setDeleteUser(null);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">Users</h2>
+        <Dialog open={addOpen} onOpenChange={setAddOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <UserPlus className="size-4" />
+              Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Add User</DialogTitle>
+              <DialogDescription>
+                Create a new user who can sign in to the dashboard.
+              </DialogDescription>
+            </DialogHeader>
+            <UserForm
+              user={null}
+              onSuccess={() => setAddOpen(false)}
+              onCancel={() => setAddOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {isLoading && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <Loader2 className="size-6 animate-spin" />
+        </div>
+      )}
+
+      {!isLoading && (!users || users.length === 0) && (
+        <Card>
+          <CardContent className="flex items-center justify-center py-8 text-center">
+            <p className="text-muted-foreground">
+              No users yet. The default admin will be created on first login.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isLoading && users && users.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
+          {users.map((u) => (
+            <Card key={u.id} className="border-l-4 border-l-muted hover:border-l-primary/50 transition-colors">
+              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Users className="size-4 text-muted-foreground shrink-0" />
+                    <CardTitle className="text-base truncate">{u.name}</CardTitle>
+                  </div>
+                  <CardDescription className="mt-1 text-xs font-mono">
+                    {u.email}
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="flex items-center gap-2 px-4 pb-3 pt-0">
+                <Dialog
+                  open={editUser?.id === u.id}
+                  onOpenChange={(open) => { if (!open) setEditUser(null); }}
+                >
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline" onClick={() => setEditUser(u)}>
+                      <Pencil className="size-4" />
+                      Edit
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Edit User</DialogTitle>
+                      <DialogDescription>
+                        Update user details or reset their password.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <UserForm
+                      user={u}
+                      onSuccess={() => setEditUser(null)}
+                      onCancel={() => setEditUser(null)}
+                    />
+                  </DialogContent>
+                </Dialog>
+                <Dialog
+                  open={deleteUser?.id === u.id}
+                  onOpenChange={(open) => { if (!open) setDeleteUser(null); }}
+                >
+                  <DialogTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => setDeleteUser(u)}
+                      disabled={(users?.length ?? 0) <= 1}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Delete User</DialogTitle>
+                      <DialogDescription>
+                        This will permanently remove &quot;{u.name}&quot; and they will no longer be able to sign in.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                      <Button variant="outline" onClick={() => setDeleteUser(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => deleteMutation.mutate(u.id)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        {deleteMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+                        Delete
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── Settings Page ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -907,6 +1217,12 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Manage notifications, retention, and exclusions</p>
       </div>
+
+      {/* User Management */}
+      <UserManagementSection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
 
       {/* Notification Channels */}
       <div className="flex items-center justify-between gap-4">
