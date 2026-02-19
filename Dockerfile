@@ -3,13 +3,19 @@ FROM node:20-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# Cache npm for faster Railway rebuilds
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci
 
 FROM base AS builder
 WORKDIR /app
+# Prisma config expects DATABASE_URL; generate only needs schema
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
+# Avoid OOM on Railway's smaller builders
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
 FROM base AS runner

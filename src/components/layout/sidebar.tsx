@@ -9,8 +9,11 @@ import {
   Settings,
   Radio,
   RefreshCw,
+  LogOut,
 } from "lucide-react";
+import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -56,8 +59,17 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-border px-5 py-3">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="border-t border-border px-3 py-3 space-y-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="w-full justify-start text-sidebar-foreground/60 hover:text-sidebar-foreground"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign Out
+        </Button>
+        <div className="flex items-center gap-2 px-3 text-xs text-muted-foreground">
           <Activity className="h-3 w-3" />
           <span className="font-mono">v1.0.0</span>
         </div>

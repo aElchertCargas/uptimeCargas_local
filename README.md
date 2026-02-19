@@ -1,6 +1,15 @@
 # Uptime Cargas
 
-Internal uptime monitoring dashboard. Tracks HTTP endpoints, sends notifications via webhook and Pushover when monitors go down/up. Syncs with the Energy Customers API to auto-manage monitors.
+Internal uptime monitoring dashboard with authentication. Tracks HTTP endpoints, sends notifications via webhook and Pushover when monitors go down/up. Syncs with the Energy Customers API to auto-manage monitors.
+
+## Features
+
+- **Secure Authentication**: NextAuth.js with username/password login
+- **Monitor Management**: CRUD API for HTTP/HTTPS monitors
+- **API Sync**: Auto-sync monitors from Energy Customers API with exclusion patterns
+- **Notifications**: Webhook and Pushover alerts
+- **Performance**: Materialized stats, batch processing, configurable retention
+- **Dashboard**: Real-time status, uptime graphs, response time charts
 
 ## Quick Start (Local)
 
@@ -24,19 +33,38 @@ npx prisma generate
 npx prisma db push
 ```
 
-### 3. Seed sample data (optional)
+### 3. Configure environment
+
+Copy `.env` and update the values:
+
+```bash
+# Generate a secure AUTH_SECRET
+openssl rand -base64 32
+
+# Update AUTH_USER_EMAIL and AUTH_USER_PASSWORD_HASH
+# To hash a password:
+node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('yourpassword', 10).then(console.log)"
+```
+
+**Default login credentials:**
+- Email: `admin@uptimecargas.local`
+- Password: `changeme`
+
+**⚠️ IMPORTANT: Change the password before deploying to production!**
+
+### 4. Seed sample data (optional)
 
 ```bash
 npm run db:seed
 ```
 
-### 4. Run dev server
+### 5. Run dev server
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) and log in.
 
 ## Docker Compose (full stack)
 
@@ -53,10 +81,20 @@ This starts both Postgres and the Next.js app. The app runs at `http://localhost
 3. Connect this repo
 4. Set environment variables:
    - `DATABASE_URL` (auto-set by Railway Postgres)
-   - `CRON_SECRET` (any random string)
+   - `CRON_SECRET` (any random string for cron auth)
    - `ENERGY_API_URL` (Energy Customers API endpoint)
    - `ENERGY_API_KEY` (API key for Energy Customers)
+   - `AUTH_SECRET` (run `openssl rand -base64 32`)
+   - `AUTH_URL` (your Railway domain, e.g., `https://your-app.up.railway.app`)
+   - `AUTH_USER_NAME` (admin name)
+   - `AUTH_USER_EMAIL` (admin email)
+   - `AUTH_USER_PASSWORD_HASH` (bcrypt hash of your password)
 5. Deploy
+
+**To generate a password hash:**
+```bash
+node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('your-secure-password', 10).then(console.log)"
+```
 
 For automated checks, set up a Railway cron job that POSTs to `/api/cron/check` with `Authorization: Bearer <CRON_SECRET>` every 60 seconds.
 
@@ -93,6 +131,11 @@ For automated checks, set up a Railway cron job that POSTs to `/api/cron/check` 
 | `CRON_SECRET` | Auth token for cron endpoint | Optional |
 | `ENERGY_API_URL` | Energy Customers public URLs endpoint | Required for sync |
 | `ENERGY_API_KEY` | API key for Energy Customers API | Required for sync |
+| `AUTH_SECRET` | NextAuth.js secret (32+ char random string) | Required |
+| `AUTH_URL` | Base URL of the application | Required |
+| `AUTH_USER_NAME` | Admin user display name | "admin" |
+| `AUTH_USER_EMAIL` | Admin user email/username | "admin@uptimecargas.local" |
+| `AUTH_USER_PASSWORD_HASH` | Bcrypt hash of admin password | "changeme" (hashed) |
 
 ## Tech Stack
 
