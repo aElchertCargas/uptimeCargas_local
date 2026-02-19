@@ -4,7 +4,7 @@ Internal uptime monitoring dashboard with authentication. Tracks HTTP endpoints,
 
 ## Features
 
-- **Secure Authentication**: NextAuth.js with username/password login
+- **Secure Authentication**: NextAuth.js with username/password login (see [AUTH_SETUP.md](./AUTH_SETUP.md) for details)
 - **Monitor Management**: CRUD API for HTTP/HTTPS monitors
 - **API Sync**: Auto-sync monitors from Energy Customers API with exclusion patterns
 - **Notifications**: Webhook and Pushover alerts
@@ -43,7 +43,7 @@ openssl rand -base64 32
 
 # Update AUTH_USER_EMAIL and AUTH_USER_PASSWORD_HASH
 # To hash a password:
-node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('yourpassword', 10).then(console.log)"
+npm run hash-password yourpassword
 ```
 
 **Default login credentials:**
@@ -66,37 +66,40 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) and log in.
 
-## Docker Compose (full stack)
+## Docker Compose (optional, full stack)
 
 ```bash
 docker compose up
 ```
 
-This starts both Postgres and the Next.js app. The app runs at `http://localhost:3000`.
+Starts Postgres and the app. Uses the included `Dockerfile` for local builds. Railway deployments use Railpack instead (see `railway.json`).
 
 ## Deploy to Railway
 
+Railway uses **Railpack** to build this app (no Dockerfile required). The build runs `prisma generate` and `next build` automatically.
+
 1. Create a new project on Railway
-2. Add a PostgreSQL service
-3. Connect this repo
+2. Add a PostgreSQL service and connect it to your app
+3. Connect this GitHub repo
 4. Set environment variables:
-   - `DATABASE_URL` (auto-set by Railway Postgres)
+   - `DATABASE_URL` (auto-set by linking Railway Postgres)
    - `CRON_SECRET` (any random string for cron auth)
    - `ENERGY_API_URL` (Energy Customers API endpoint)
    - `ENERGY_API_KEY` (API key for Energy Customers)
    - `AUTH_SECRET` (run `openssl rand -base64 32`)
-   - `AUTH_URL` (your Railway domain, e.g., `https://your-app.up.railway.app`)
-   - `AUTH_USER_NAME` (admin name)
-   - `AUTH_USER_EMAIL` (admin email)
+   - `AUTH_URL` (your Railway domain, e.g., `https://uptimecargas-production.up.railway.app`)
+   - `AUTH_TRUST_HOST` (set to `true` — required for NextAuth behind Railway's proxy)
+   - `AUTH_USER_NAME` (admin display name)
+   - `AUTH_USER_EMAIL` (admin email/username)
    - `AUTH_USER_PASSWORD_HASH` (bcrypt hash of your password)
 5. Deploy
 
-**To generate a password hash:**
+**Generate a password hash:**
 ```bash
-node -e "const bcrypt = require('bcryptjs'); bcrypt.hash('your-secure-password', 10).then(console.log)"
+npm run hash-password your-secure-password
 ```
 
-For automated checks, set up a Railway cron job that POSTs to `/api/cron/check` with `Authorization: Bearer <CRON_SECRET>` every 60 seconds.
+**Automated checks:** Set up a Railway cron job that POSTs to `/api/cron/check` with `Authorization: Bearer <CRON_SECRET>` every 60 seconds.
 
 ## API
 
@@ -133,14 +136,16 @@ For automated checks, set up a Railway cron job that POSTs to `/api/cron/check` 
 | `ENERGY_API_KEY` | API key for Energy Customers API | Required for sync |
 | `AUTH_SECRET` | NextAuth.js secret (32+ char random string) | Required |
 | `AUTH_URL` | Base URL of the application | Required |
+| `AUTH_TRUST_HOST` | Must be `true` for Railway/proxy deployments | Required on Railway |
 | `AUTH_USER_NAME` | Admin user display name | "admin" |
 | `AUTH_USER_EMAIL` | Admin user email/username | "admin@uptimecargas.local" |
 | `AUTH_USER_PASSWORD_HASH` | Bcrypt hash of admin password | "changeme" (hashed) |
 
 ## Tech Stack
 
-- Next.js 15 (App Router)
+- Next.js 16 (App Router)
 - PostgreSQL + Prisma 7
+- NextAuth.js v5 (authentication)
 - shadcn/ui + Tailwind CSS v4
 - TanStack React Query
 - Recharts
