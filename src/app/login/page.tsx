@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    urlError === "CredentialsSignin" ? "Invalid email or password" : ""
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -23,23 +25,14 @@ function LoginForm() {
     setIsLoading(true);
 
     try {
-      const result = await signIn("credentials", {
+      const callbackUrl = searchParams.get("callbackUrl") || "/";
+      await signIn("credentials", {
         email,
         password,
-        redirect: false,
+        redirectTo: callbackUrl,
       });
-
-      if (result?.error) {
-        setError("Invalid email or password");
-        setIsLoading(false);
-        return;
-      }
-
-      const callbackUrl = searchParams.get("callbackUrl") || "/";
-      router.push(callbackUrl);
-      router.refresh();
-    } catch (err) {
-      setError("An error occurred. Please try again.");
+    } catch {
+      setError("Invalid email or password");
       setIsLoading(false);
     }
   };

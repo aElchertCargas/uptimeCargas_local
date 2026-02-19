@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { DM_Mono, Instrument_Sans } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
-import { Sidebar } from "@/components/layout/sidebar";
 import { ErrorBoundary } from "@/components/error-boundary";
 import "./globals.css";
 
@@ -34,12 +33,7 @@ export default function RootLayout({
         className={`${instrumentSans.variable} ${dmMono.variable} font-sans antialiased`}
       >
         <Providers>
-          <Sidebar />
-          <main className="ml-56 min-h-screen">
-            <div className="mx-auto max-w-7xl px-6 py-6">
-              <ErrorBoundary>{children}</ErrorBoundary>
-            </div>
-          </main>
+          <ErrorBoundary>{children}</ErrorBoundary>
           <Toaster />
         </Providers>
       </body>
