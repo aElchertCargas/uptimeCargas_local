@@ -1,14 +1,12 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
+    "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "node server.js",
+    "startCommand": "npx prisma db push --skip-generate && npm run start",
     "healthcheckPath": "/",
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10,
-    "cronSchedule": null
+    "restartPolicyMaxRetries": 10
   }
 }
