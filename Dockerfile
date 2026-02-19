@@ -3,9 +3,7 @@ FROM node:20-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-# Cache npm for faster Railway rebuilds
-RUN --mount=type=cache,target=/root/.npm \
-  npm ci
+RUN npm ci
 
 FROM base AS builder
 WORKDIR /app
