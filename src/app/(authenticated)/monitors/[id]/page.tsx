@@ -62,6 +62,8 @@ interface ChecksResponse {
   pagination: { page: number; limit: number; total: number; pages: number };
 }
 
+type StatusFilter = "all" | "up" | "down";
+
 function getStatusBadge(monitor: Monitor) {
   if (!monitor.active) {
     return <Badge className="bg-[var(--color-status-pending)] text-white">PENDING</Badge>;
@@ -170,6 +172,7 @@ export default function MonitorDetailPage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [banDialogOpen, setBanDialogOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const banAndDelete = useMutation({
     mutationFn: async () => {
@@ -201,10 +204,17 @@ export default function MonitorDetailPage() {
   }
 
   const checks = checksData?.checks ?? [];
+  const filteredChecks =
+    statusFilter === "all"
+      ? checks
+      : statusFilter === "down"
+        ? checks.filter((c) => !c.isUp)
+        : checks.filter((c) => c.isUp);
   const uptimeData = generateMockUptimeData(checks);
   const chartData = checks.map((c) => ({
     checkedAt: c.checkedAt,
     responseTime: c.responseTime,
+    isUp: c.isUp,
   })).reverse();
 
   return (
@@ -257,8 +267,21 @@ export default function MonitorDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="font-mono">Recent Checks</CardTitle>
-          <CardDescription>Last 24 hours</CardDescription>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="font-mono">Recent Checks</CardTitle>
+              <CardDescription>Last 24 hours</CardDescription>
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="h-9 w-full rounded-md border border-input bg-card px-3 py-1 font-mono text-sm outline-none focus:ring-2 focus:ring-ring sm:w-auto"
+            >
+              <option value="all">All status</option>
+              <option value="up">Up</option>
+              <option value="down">Down</option>
+            </select>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -271,14 +294,16 @@ export default function MonitorDetailPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {checks.length === 0 ? (
+              {filteredChecks.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-muted-foreground">
-                    No checks yet
+                    {checks.length === 0
+                      ? "No checks yet"
+                      : `No ${statusFilter} checks in the last 24 hours`}
                   </TableCell>
                 </TableRow>
               ) : (
-                checks.map((check) => (
+                filteredChecks.map((check) => (
                   <TableRow key={check.id}>
                     <TableCell className="font-mono">
                       {formatDateTime(check.checkedAt)}
