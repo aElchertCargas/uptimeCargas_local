@@ -217,17 +217,6 @@ export function MonitorGrid({ monitors }: MonitorGridProps) {
           />
         </div>
         <div className="flex items-center gap-3">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="h-9 rounded-md border border-input bg-card px-3 py-1 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="all">All status</option>
-            <option value="up">Up</option>
-            <option value="down">Down</option>
-            <option value="pending">Pending</option>
-          </select>
-
           {selectMode ? (
             <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={selectAll}>
@@ -241,21 +230,25 @@ export function MonitorGrid({ monitors }: MonitorGridProps) {
               </Button>
             </div>
           ) : (
-            <>
-              <span className="font-mono text-sm text-muted-foreground">
-                {filteredMonitors.length} monitor
-                {filteredMonitors.length !== 1 ? "s" : ""}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSelectMode(true)}
-              >
-                <MousePointerClick className="size-4" />
-                Select
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSelectMode(true)}
+            >
+              <MousePointerClick className="size-4" />
+              Select
+            </Button>
           )}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="h-9 rounded-md border border-input bg-card px-3 py-1 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="all">All status</option>
+            <option value="up">Up</option>
+            <option value="down">Down</option>
+            <option value="pending">Pending</option>
+          </select>
         </div>
       </div>
 
