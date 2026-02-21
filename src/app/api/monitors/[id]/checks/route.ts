@@ -15,16 +15,11 @@ export async function GET(
   const to = sp.get("to");
   const hours = sp.get("hours");
 
-  // Build date filter
   let checkedAtFilter: { gte?: Date; lte?: Date } | undefined;
   if (from || to) {
     checkedAtFilter = {};
     if (from) checkedAtFilter.gte = new Date(from);
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setHours(23, 59, 59, 999);
-      checkedAtFilter.lte = toDate;
-    }
+    if (to) checkedAtFilter.lte = new Date(to);
   } else if (hours) {
     checkedAtFilter = { gte: new Date(Date.now() - parseInt(hours) * 3600_000) };
   }

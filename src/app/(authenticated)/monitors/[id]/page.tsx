@@ -48,6 +48,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
 import { UptimeBar } from "@/components/dashboard/uptime-bar";
 import { ResponseChart } from "@/components/dashboard/response-chart";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import type { DateRange } from "react-day-picker";
 
@@ -143,31 +145,54 @@ function formatDateShort(date: Date): string {
   });
 }
 
-function toISODate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 // ─── Checks Table with Pagination ────────────────────────────────────────────
+
+function applyTime(date: Date, time: string): Date {
+  const d = new Date(date);
+  const [h, m] = time.split(":").map(Number);
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
 
 function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [fromTime, setFromTime] = useState("00:00");
+  const [toTime, setToTime] = useState("23:59");
   const [calendarOpen, setCalendarOpen] = useState(false);
+
+  const { data: settings } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const retentionDays = parseInt(settings?.retentionDays ?? "90", 10);
+  const earliestDate = new Date(Date.now() - retentionDays * 86_400_000);
 
   const buildUrl = useCallback(() => {
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", String(PAGE_SIZE));
     if (statusFilter !== "all") params.set("status", statusFilter);
-    if (dateRange?.from) params.set("from", toISODate(dateRange.from));
-    if (dateRange?.to) params.set("to", toISODate(dateRange.to));
+    if (dateRange?.from) {
+      params.set("from", applyTime(dateRange.from, fromTime).toISOString());
+    }
+    if (dateRange?.to) {
+      params.set("to", applyTime(dateRange.to, toTime).toISOString());
+    } else if (dateRange?.from) {
+      params.set("to", applyTime(dateRange.from, toTime).toISOString());
+    }
     if (!dateRange?.from && !dateRange?.to) params.set("hours", "24");
     return `/api/monitors/${monitorId}/checks?${params}`;
-  }, [monitorId, page, statusFilter, dateRange]);
+  }, [monitorId, page, statusFilter, dateRange, fromTime, toTime]);
 
   const { data, isLoading, isFetching } = useQuery<ChecksResponse>({
-    queryKey: ["monitor-checks", monitorId, page, statusFilter, dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
+    queryKey: ["monitor-checks", monitorId, page, statusFilter, dateRange?.from?.toISOString(), dateRange?.to?.toISOString(), fromTime, toTime],
     queryFn: async () => {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error("Failed to fetch checks");
@@ -190,6 +215,8 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
 
   const clearDateRange = () => {
     setDateRange(undefined);
+    setFromTime("00:00");
+    setToTime("23:59");
     setPage(1);
     setCalendarOpen(false);
   };
@@ -197,8 +224,8 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
   const hasDateFilter = !!dateRange?.from;
   const dateLabel = hasDateFilter
     ? dateRange.to
-      ? `${formatDateShort(dateRange.from!)} – ${formatDateShort(dateRange.to)}`
-      : formatDateShort(dateRange.from!)
+      ? `${formatDateShort(dateRange.from!)} ${fromTime} – ${formatDateShort(dateRange.to)} ${toTime}`
+      : `${formatDateShort(dateRange.from!)} ${fromTime} – ${toTime}`
     : "Last 24 hours";
 
   return (
@@ -241,10 +268,29 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
                   mode="range"
                   selected={dateRange}
                   onSelect={handleDateSelect}
-                  disabled={{ after: new Date() }}
-                  numberOfMonths={2}
-                  defaultMonth={dateRange?.from ?? new Date(Date.now() - 30 * 86_400_000)}
+                  disabled={{ before: earliestDate, after: new Date() }}
+                  defaultMonth={dateRange?.from ?? earliestDate}
                 />
+                <div className="flex items-center gap-4 border-t px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground whitespace-nowrap">From</Label>
+                    <Input
+                      type="time"
+                      value={fromTime}
+                      onChange={(e) => { setFromTime(e.target.value); setPage(1); }}
+                      className="h-8 w-[7rem] font-mono text-xs"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground whitespace-nowrap">To</Label>
+                    <Input
+                      type="time"
+                      value={toTime}
+                      onChange={(e) => { setToTime(e.target.value); setPage(1); }}
+                      className="h-8 w-[7rem] font-mono text-xs"
+                    />
+                  </div>
+                </div>
                 <div className="flex items-center justify-between border-t px-3 py-2">
                   <Button
                     variant="ghost"
