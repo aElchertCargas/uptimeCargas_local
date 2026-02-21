@@ -78,6 +78,17 @@ model AppSetting {
   value String
 }
 
+model DebugLog {
+  id        String   @id @default(cuid())
+  type      String   // "down" | "up" | "webhook_sent" | "webhook_failed"
+  monitor   String
+  channel   String?
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String

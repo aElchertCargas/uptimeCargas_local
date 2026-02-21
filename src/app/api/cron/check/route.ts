@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
-import { dispatchNotification, type NotificationPayload } from "@/lib/notifications";
+import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
 
 export const maxDuration = 120;
 
@@ -26,7 +26,7 @@ async function sendNotifications(payload: NotificationPayload) {
   });
   await Promise.allSettled(
     channels.map((ch) =>
-      dispatchNotification(ch.type, ch.config as Record<string, unknown>, payload)
+      dispatchNotification(ch.type, ch.name, ch.config as Record<string, unknown>, payload)
     )
   );
 }
@@ -127,12 +127,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Handle state transitions: create/resolve incidents
   for (const { monitor, result } of stateChanges) {
     if (!result.isUp) {
       await prisma.incident.create({
         data: { monitorId: monitor.id, message: result.message },
       });
+      await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
     } else {
       const openIncident = await prisma.incident.findFirst({
         where: { monitorId: monitor.id, resolvedAt: null },
@@ -143,8 +143,8 @@ export async function POST(request: NextRequest) {
           where: { id: openIncident.id },
           data: { resolvedAt: new Date() },
         });
+        await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
-        // Only send recovery notification if the down alert was already sent
         if (openIncident.notifiedAt) {
           await sendNotifications({
             monitorName: monitor.name,

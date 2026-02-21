@@ -18,6 +18,7 @@ export async function POST(
 
   const success = await dispatchNotification(
     channel.type,
+    channel.name,
     channel.config as Record<string, unknown>,
     {
       monitorName: "Test Monitor",

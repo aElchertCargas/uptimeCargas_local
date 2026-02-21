@@ -5,6 +5,7 @@ const DEFAULTS: Record<string, string> = {
   retentionDays: "90",
   defaultInterval: "120",
   alertDelaySeconds: "300",
+  debugLogEnabled: "true",
 };
 
 export async function GET() {

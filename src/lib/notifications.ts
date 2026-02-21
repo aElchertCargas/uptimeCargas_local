@@ -1,3 +1,5 @@
+import { prisma } from "@/lib/prisma";
+
 interface WebhookConfig {
   url: string;
 }
@@ -175,17 +177,48 @@ export async function sendTeams(
 
 export async function dispatchNotification(
   channelType: string,
+  channelName: string,
   config: Record<string, unknown>,
   payload: NotificationPayload
 ): Promise<boolean> {
+  let ok = false;
   switch (channelType) {
     case "webhook":
-      return sendWebhook(config as unknown as WebhookConfig, payload);
+      ok = await sendWebhook(config as unknown as WebhookConfig, payload);
+      break;
     case "pushover":
-      return sendPushover(config as unknown as PushoverConfig, payload);
+      ok = await sendPushover(config as unknown as PushoverConfig, payload);
+      break;
     case "teams":
-      return sendTeams(config as unknown as TeamsConfig, payload);
-    default:
-      return false;
+      ok = await sendTeams(config as unknown as TeamsConfig, payload);
+      break;
   }
+
+  await writeDebugLog(
+    ok ? "webhook_sent" : "webhook_failed",
+    payload.monitorName,
+    channelName,
+    ok
+      ? `${channelType} notification sent (${payload.status})`
+      : `${channelType} notification failed (${payload.status})`
+  ).catch(() => {});
+
+  return ok;
+}
+
+export async function writeDebugLog(
+  type: string,
+  monitor: string,
+  channel: string | null,
+  message: string
+) {
+  const enabled = await prisma.appSetting
+    .findUnique({ where: { key: "debugLogEnabled" } })
+    .then((r) => r?.value !== "false")
+    .catch(() => true);
+  if (!enabled) return;
+
+  await prisma.debugLog.create({
+    data: { type, monitor, channel, message },
+  });
 }

@@ -14,6 +14,7 @@ import {
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { DebugLogPanel } from "@/components/layout/debug-log-panel";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -58,6 +59,8 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      <DebugLogPanel />
 
       <div className="border-t border-border px-3 py-3 space-y-2">
         <Button

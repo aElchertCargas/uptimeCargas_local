@@ -1450,6 +1450,92 @@ function UserManagementSection() {
   );
 }
 
+// ─── Debug Log Section ───────────────────────────────────────────────────────
+
+function DebugLogSection() {
+  const queryClient = useQueryClient();
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const enabled = settings?.debugLogEnabled !== "false";
+
+  const toggleMutation = useMutation({
+    mutationFn: async (value: boolean) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debugLogEnabled: String(value) }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["debug-log"] });
+      toast.success("Debug log setting updated");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/debug-log", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to clear");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["debug-log"] });
+      toast.success("Debug log cleared");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">Debug Log</h2>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Event Logging</CardTitle>
+          <CardDescription>
+            When enabled, down/up events and webhook dispatches are logged and visible in the sidebar debug panel.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="debug-log-toggle"
+              checked={enabled}
+              onCheckedChange={(v) => toggleMutation.mutate(v)}
+              disabled={isLoading || toggleMutation.isPending}
+            />
+            <Label htmlFor="debug-log-toggle">
+              {enabled ? "Debug logging enabled" : "Debug logging disabled"}
+            </Label>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => clearMutation.mutate()}
+            disabled={clearMutation.isPending}
+          >
+            {clearMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+            <Trash2 className="size-4" />
+            Clear All Logs
+          </Button>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 // ─── Settings Page ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1555,6 +1641,12 @@ export default function SettingsPage() {
 
       {/* Excluded Patterns */}
       <ExcludedPatternsSection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
+
+      {/* Debug Log */}
+      <DebugLogSection />
     </div>
   );
 }
