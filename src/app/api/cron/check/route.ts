@@ -127,38 +127,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Create incidents for new down events (before delayed send so they're eligible)
   for (const { monitor, result } of stateChanges) {
     if (!result.isUp) {
       await prisma.incident.create({
         data: { monitorId: monitor.id, message: result.message },
       });
       await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
-    } else {
-      const openIncident = await prisma.incident.findFirst({
-        where: { monitorId: monitor.id, resolvedAt: null },
-        orderBy: { startedAt: "desc" },
-      });
-      if (openIncident) {
-        await prisma.incident.update({
-          where: { id: openIncident.id },
-          data: { resolvedAt: new Date() },
-        });
-        await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
-
-        if (openIncident.notifiedAt) {
-          await sendNotifications({
-            monitorName: monitor.name,
-            monitorUrl: monitor.url,
-            status: "up",
-            message: `${monitor.name} is back UP (${result.responseTime}ms)`,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      }
     }
   }
 
-  // Send delayed down notifications for incidents that have exceeded the alert delay
+  // Send delayed down notifications BEFORE resolving recoveries so that
+  // incidents resolved in this same cycle still get notifiedAt set first,
+  // allowing the recovery handler to send the UP notification.
   const alertDelay = await getAlertDelay();
   const delayCutoff = new Date(now - alertDelay * 1000);
 
@@ -184,6 +165,34 @@ export async function POST(request: NextRequest) {
       where: { id: incident.id },
       data: { notifiedAt: new Date() },
     });
+  }
+
+  // Now handle recoveries -- notifiedAt is guaranteed to be set if the
+  // delayed send already fired, so recovery notifications will be sent.
+  for (const { monitor, result } of stateChanges) {
+    if (result.isUp) {
+      const openIncident = await prisma.incident.findFirst({
+        where: { monitorId: monitor.id, resolvedAt: null },
+        orderBy: { startedAt: "desc" },
+      });
+      if (openIncident) {
+        await prisma.incident.update({
+          where: { id: openIncident.id },
+          data: { resolvedAt: new Date() },
+        });
+        await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
+
+        if (openIncident.notifiedAt) {
+          await sendNotifications({
+            monitorName: monitor.name,
+            monitorUrl: monitor.url,
+            status: "up",
+            message: `${monitor.name} is back UP (${result.responseTime}ms)`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
   }
 
   return NextResponse.json({
