@@ -12,6 +12,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CalendarIcon,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import {
@@ -73,6 +74,9 @@ interface Monitor {
   active: boolean;
   tags: string[];
   checks: Check[];
+  sslExpiresAt: string | null;
+  sslIssuer: string | null;
+  sslLastCheckedAt: string | null;
 }
 
 interface ChecksResponse {
@@ -439,6 +443,95 @@ function PaginatedChecksTable({
   );
 }
 
+// ─── SSL Info Card ───────────────────────────────────────────────────────────
+
+function getSslColor(days: number): string {
+  if (days <= 0) return "text-[var(--color-status-down)]";
+  if (days <= 7) return "text-[var(--color-status-down)]";
+  if (days <= 30) return "text-amber-500";
+  return "text-[var(--color-status-up)]";
+}
+
+function getSslBadge(days: number) {
+  if (days <= 0) {
+    return <Badge className="bg-[var(--color-status-down)] text-white">EXPIRED</Badge>;
+  }
+  if (days <= 7) {
+    return <Badge className="bg-[var(--color-status-down)] text-white">CRITICAL</Badge>;
+  }
+  if (days <= 30) {
+    return <Badge className="bg-amber-500 text-white">WARNING</Badge>;
+  }
+  return <Badge className="bg-[var(--color-status-up)] text-white">VALID</Badge>;
+}
+
+function SslInfoCard({ monitor }: { monitor: Monitor }) {
+  if (!monitor.sslExpiresAt) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-muted-foreground" />
+            <CardTitle className="font-mono text-base">SSL Certificate</CardTitle>
+          </div>
+          <CardDescription>
+            Not yet checked. Run an SSL check from Settings or wait for the daily scan.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const expiresAt = new Date(monitor.sslExpiresAt);
+  const daysRemaining = Math.floor((expiresAt.getTime() - Date.now()) / 86_400_000);
+  const colorClass = getSslColor(daysRemaining);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className={`size-4 ${colorClass}`} />
+            <CardTitle className="font-mono text-base">SSL Certificate</CardTitle>
+          </div>
+          {getSslBadge(daysRemaining)}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Expires</p>
+            <p className="font-mono text-sm font-medium">
+              {expiresAt.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Days Remaining</p>
+            <p className={`font-mono text-sm font-medium ${colorClass}`}>
+              {daysRemaining <= 0 ? "Expired" : `${daysRemaining} day${daysRemaining === 1 ? "" : "s"}`}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Issuer</p>
+            <p className="font-mono text-sm font-medium truncate">
+              {monitor.sslIssuer ?? "Unknown"}
+            </p>
+          </div>
+        </div>
+        {monitor.sslLastCheckedAt && (
+          <p className="mt-3 text-[10px] text-muted-foreground">
+            Last checked: {formatDateTime(monitor.sslLastCheckedAt)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Monitor Detail Page ─────────────────────────────────────────────────────
 
 export default function MonitorDetailPage() {
@@ -577,6 +670,10 @@ export default function MonitorDetailPage() {
           <UptimeBar data={uptimeData} />
         </CardContent>
       </Card>
+
+      {monitor.url.startsWith("https://") && (
+        <SslInfoCard monitor={monitor} />
+      )}
 
       <Card>
         <CardHeader>

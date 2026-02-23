@@ -6,6 +6,7 @@ const DEFAULTS: Record<string, string> = {
   defaultInterval: "120",
   alertDelaySeconds: "300",
   debugLogEnabled: "true",
+  sslAlertDays: "1",
 };
 
 export async function GET() {

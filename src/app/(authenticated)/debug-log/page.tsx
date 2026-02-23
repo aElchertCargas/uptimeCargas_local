@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Send,
   AlertTriangle,
+  ShieldAlert,
   Trash2,
   Loader2,
 } from "lucide-react";
@@ -38,13 +39,15 @@ interface DebugLogResponse {
 }
 
 const TYPE_META: Record<string, { icon: typeof ArrowDown; color: string; label: string; badgeClass: string }> = {
-  down:           { icon: ArrowDown,      color: "text-[var(--color-status-down)]", label: "DOWN", badgeClass: "bg-[var(--color-status-down)] text-white" },
-  up:             { icon: ArrowUp,        color: "text-[var(--color-status-up)]",   label: "UP",   badgeClass: "bg-[var(--color-status-up)] text-white" },
-  webhook_sent:   { icon: Send,           color: "text-blue-400",                   label: "SENT", badgeClass: "bg-blue-500 text-white" },
-  webhook_failed: { icon: AlertTriangle,  color: "text-amber-400",                 label: "FAIL", badgeClass: "bg-amber-500 text-white" },
+  down:           { icon: ArrowDown,      color: "text-[var(--color-status-down)]", label: "DOWN",    badgeClass: "bg-[var(--color-status-down)] text-white" },
+  up:             { icon: ArrowUp,        color: "text-[var(--color-status-up)]",   label: "UP",      badgeClass: "bg-[var(--color-status-up)] text-white" },
+  webhook_sent:   { icon: Send,           color: "text-blue-400",                   label: "SENT",    badgeClass: "bg-blue-500 text-white" },
+  webhook_failed: { icon: AlertTriangle,  color: "text-amber-400",                 label: "FAIL",    badgeClass: "bg-amber-500 text-white" },
+  ssl_expiring:   { icon: ShieldAlert,    color: "text-amber-400",                 label: "SSL",     badgeClass: "bg-amber-500 text-white" },
+  ssl_error:      { icon: ShieldAlert,    color: "text-[var(--color-status-down)]", label: "SSL ERR", badgeClass: "bg-[var(--color-status-down)] text-white" },
 };
 
-type FilterType = "all" | "down" | "up" | "webhook_sent" | "webhook_failed";
+type FilterType = "all" | "down" | "up" | "webhook_sent" | "webhook_failed" | "ssl_expiring" | "ssl_error";
 
 function formatDateTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString("en-US", {
@@ -86,12 +89,14 @@ export default function DebugLogPage() {
   const allLogs = data?.logs ?? [];
   const logs = typeFilter === "all" ? allLogs : allLogs.filter((l) => l.type === typeFilter);
 
-  const counts = {
+  const counts: Record<FilterType, number> = {
     all: allLogs.length,
     down: allLogs.filter((l) => l.type === "down").length,
     up: allLogs.filter((l) => l.type === "up").length,
     webhook_sent: allLogs.filter((l) => l.type === "webhook_sent").length,
     webhook_failed: allLogs.filter((l) => l.type === "webhook_failed").length,
+    ssl_expiring: allLogs.filter((l) => l.type === "ssl_expiring").length,
+    ssl_error: allLogs.filter((l) => l.type === "ssl_error").length,
   };
 
   return (
@@ -100,7 +105,7 @@ export default function DebugLogPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Debug Log</h1>
           <p className="text-sm text-muted-foreground">
-            Down/up events and webhook dispatch history
+            Down/up events, webhook dispatches, and SSL certificate alerts
           </p>
         </div>
         <Button
@@ -115,7 +120,7 @@ export default function DebugLogPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["all", "down", "up", "webhook_sent", "webhook_failed"] as FilterType[]).map((f) => {
+        {(["all", "down", "up", "webhook_sent", "webhook_failed", "ssl_expiring", "ssl_error"] as FilterType[]).map((f) => {
           const meta = TYPE_META[f];
           const active = typeFilter === f;
           return (

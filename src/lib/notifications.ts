@@ -22,7 +22,7 @@ interface TeamsConfig {
 export interface NotificationPayload {
   monitorName: string;
   monitorUrl: string;
-  status: "down" | "up";
+  status: "down" | "up" | "ssl_expiring";
   message: string;
   timestamp: string;
 }
@@ -36,7 +36,11 @@ export async function sendWebhook(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        event: payload.status === "down" ? "monitor.down" : "monitor.up",
+        event: payload.status === "ssl_expiring"
+          ? "monitor.ssl_expiring"
+          : payload.status === "down"
+            ? "monitor.down"
+            : "monitor.up",
         monitor: {
           name: payload.monitorName,
           url: payload.monitorUrl,
@@ -55,8 +59,10 @@ export async function sendPushover(
   config: PushoverConfig,
   payload: NotificationPayload
 ): Promise<boolean> {
-  const icon = payload.status === "down" ? "🔴" : "🟢";
-  const title = `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`;
+  const icon = payload.status === "down" ? "🔴" : payload.status === "ssl_expiring" ? "🟡" : "🟢";
+  const title = payload.status === "ssl_expiring"
+    ? `${icon} ${payload.monitorName} SSL Certificate Expiring`
+    : `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`;
 
   try {
     const response = await fetch("https://api.pushover.net/1/messages.json", {
@@ -104,8 +110,8 @@ function interpolateTemplate(template: string, payload: NotificationPayload): st
 }
 
 function buildAdaptiveCard(payload: NotificationPayload) {
-  const color = payload.status === "down" ? "attention" : "good";
-  const icon = payload.status === "down" ? "🔴" : "🟢";
+  const color = payload.status === "down" ? "attention" : payload.status === "ssl_expiring" ? "warning" : "good";
+  const icon = payload.status === "down" ? "🔴" : payload.status === "ssl_expiring" ? "🟡" : "🟢";
   const estTime = toEST(payload.timestamp);
 
   return {
@@ -122,7 +128,9 @@ function buildAdaptiveCard(payload: NotificationPayload) {
               type: "TextBlock",
               size: "medium",
               weight: "bolder",
-              text: `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`,
+              text: payload.status === "ssl_expiring"
+                ? `${icon} ${payload.monitorName} SSL Certificate Expiring`
+                : `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`,
               color,
             },
             {

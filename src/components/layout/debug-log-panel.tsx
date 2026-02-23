@@ -13,6 +13,7 @@ import {
   ArrowUp,
   Send,
   AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,8 @@ const TYPE_CONFIG: Record<string, { icon: typeof ArrowDown; color: string; label
   up: { icon: ArrowUp, color: "text-[var(--color-status-up)]", label: "UP" },
   webhook_sent: { icon: Send, color: "text-blue-400", label: "SENT" },
   webhook_failed: { icon: AlertTriangle, color: "text-amber-400", label: "FAIL" },
+  ssl_expiring: { icon: ShieldAlert, color: "text-amber-400", label: "SSL" },
+  ssl_error: { icon: ShieldAlert, color: "text-[var(--color-status-down)]", label: "SSL ERR" },
 };
 
 function formatTime(dateStr: string): string {

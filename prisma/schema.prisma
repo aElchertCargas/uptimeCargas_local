@@ -24,6 +24,10 @@ model Monitor {
   lastCheckedAt    DateTime?
   uptime24h        Float?
   avgResponseTime24h Int?
+  // SSL certificate info (populated by daily ssl-check cron)
+  sslExpiresAt     DateTime?
+  sslIssuer        String?
+  sslLastCheckedAt DateTime?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   checks           Check[]

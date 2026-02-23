@@ -999,6 +999,125 @@ function AlertDelaySection() {
   );
 }
 
+// ─── SSL Alert Section ───────────────────────────────────────────────────────
+
+function SslAlertSection() {
+  const queryClient = useQueryClient();
+  const [days, setDays] = useState("");
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const loaded = !isLoading && settings;
+  const currentDays = settings?.sslAlertDays ?? "1";
+
+  const saveMutation = useMutation({
+    mutationFn: async (sslAlertDays: string) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sslAlertDays }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success("SSL alert threshold updated");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const runSslCheckMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/cron/ssl-check", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? "local-dev-secret"}`,
+        },
+      });
+      if (!res.ok) throw new Error("SSL check failed");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success(`Checked ${data.checked} certificate(s), ${data.alerted} alert(s) sent`);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const handleSave = () => {
+    const val = parseInt(days || currentDays, 10);
+    if (isNaN(val) || val < 1) {
+      toast.error("Enter at least 1 day");
+      return;
+    }
+    saveMutation.mutate(String(val));
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">SSL Certificate Alerts</h2>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Expiry Alert Threshold</CardTitle>
+          <CardDescription>
+            Send a notification when an SSL certificate expires within this many days. Certificates are checked once per day.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-end gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="ssl-alert-days" className="font-mono">
+                Days before expiry
+              </Label>
+              <Input
+                id="ssl-alert-days"
+                type="number"
+                min={1}
+                className="w-32 font-mono"
+                placeholder={loaded ? currentDays : "1"}
+                value={days}
+                onChange={(e) => setDays(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button
+              onClick={handleSave}
+              disabled={saveMutation.isPending || isLoading}
+            >
+              {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Save
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => runSslCheckMutation.mutate()}
+              disabled={runSslCheckMutation.isPending}
+            >
+              {runSslCheckMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Check Now
+            </Button>
+          </div>
+          {loaded && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Currently alerting when certificates expire within{" "}
+              <span className="font-mono font-medium">{currentDays}</span> day{currentDays === "1" ? "" : "s"}.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 // ─── Excluded Patterns Section ───────────────────────────────────────────────
 
 function ExcludedPatternsSection() {
@@ -1629,6 +1748,12 @@ export default function SettingsPage() {
 
       {/* Alert Delay */}
       <AlertDelaySection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
+
+      {/* SSL Certificate Alerts */}
+      <SslAlertSection />
 
       {/* Divider */}
       <div className="border-t border-border" />
