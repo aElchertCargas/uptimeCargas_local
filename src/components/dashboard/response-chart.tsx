@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import {
   Area,
   ComposedChart,
@@ -15,12 +16,12 @@ import {
 export interface ResponseChartDataPoint {
   checkedAt: string;
   responseTime: number;
-  /** When false, the point is shown as a red dot (failed fetch). */
   isUp?: boolean;
 }
 
 interface ResponseChartProps {
   data: ResponseChartDataPoint[];
+  onRangeSelect?: (from: string, to: string) => void;
 }
 
 function formatTime(dateStr: string): string {
@@ -57,7 +58,6 @@ const CustomTooltip = ({
   );
 };
 
-/** Returns segments of consecutive down points [startCheckedAt, endCheckedAt]. */
 function getDownSegments(sortedData: ResponseChartDataPoint[]): { x1: string; x2: string }[] {
   const segments: { x1: string; x2: string }[] = [];
   let segmentStart: string | null = null;
@@ -82,13 +82,54 @@ function getDownSegments(sortedData: ResponseChartDataPoint[]): { x1: string; x2
 }
 
 const DOWN_COLOR = "var(--color-status-down)";
+const SELECTION_COLOR = "hsl(221 83% 53%)";
 
-export function ResponseChart({ data }: ResponseChartProps) {
+export function ResponseChart({ data, onRangeSelect }: ResponseChartProps) {
+  const [selectStart, setSelectStart] = useState<string | null>(null);
+  const [selectEnd, setSelectEnd] = useState<string | null>(null);
+
   const chartData = [...data].sort(
     (a, b) =>
       new Date(a.checkedAt).getTime() - new Date(b.checkedAt).getTime()
   );
   const downSegments = getDownSegments(chartData);
+
+  const handleMouseDown = useCallback(
+    (e: { activeLabel?: string }) => {
+      if (!onRangeSelect || !e?.activeLabel) return;
+      setSelectStart(e.activeLabel);
+      setSelectEnd(null);
+    },
+    [onRangeSelect]
+  );
+
+  const handleMouseMove = useCallback(
+    (e: { activeLabel?: string }) => {
+      if (!selectStart || !e?.activeLabel) return;
+      setSelectEnd(e.activeLabel);
+    },
+    [selectStart]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    if (!selectStart || !selectEnd || !onRangeSelect) {
+      setSelectStart(null);
+      setSelectEnd(null);
+      return;
+    }
+
+    const t1 = new Date(selectStart).getTime();
+    const t2 = new Date(selectEnd).getTime();
+    const from = t1 < t2 ? selectStart : selectEnd;
+    const to = t1 < t2 ? selectEnd : selectStart;
+
+    setSelectStart(null);
+    setSelectEnd(null);
+
+    if (from !== to) {
+      onRangeSelect(from, to);
+    }
+  }, [selectStart, selectEnd, onRangeSelect]);
 
   if (chartData.length === 0) {
     return (
@@ -99,11 +140,14 @@ export function ResponseChart({ data }: ResponseChartProps) {
   }
 
   return (
-    <div className="h-64 w-full">
+    <div className="h-64 w-full select-none">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart
           data={chartData}
           margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
         >
           <CartesianGrid
             strokeDasharray="3 3"
@@ -155,6 +199,15 @@ export function ResponseChart({ data }: ResponseChartProps) {
               fillOpacity={0.2}
             />
           ))}
+          {selectStart && selectEnd && (
+            <ReferenceArea
+              x1={selectStart}
+              x2={selectEnd}
+              strokeOpacity={0}
+              fill={SELECTION_COLOR}
+              fillOpacity={0.15}
+            />
+          )}
           <Area
             type="monotone"
             dataKey="responseTime"
@@ -201,6 +254,11 @@ export function ResponseChart({ data }: ResponseChartProps) {
           />
         </ComposedChart>
       </ResponsiveContainer>
+      {onRangeSelect && (
+        <p className="mt-1 text-center text-[10px] text-muted-foreground">
+          Click and drag on the chart to filter checks to a time range
+        </p>
+      )}
     </div>
   );
 }

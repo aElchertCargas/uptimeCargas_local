@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   Bug,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
   Trash2,
   ArrowDown,
   ArrowUp,
@@ -105,8 +107,14 @@ export function DebugLogPanel() {
 
       {!collapsed && (
         <div className="flex flex-col">
-          {logs.length > 0 && (
-            <div className="flex justify-end px-3 pb-1">
+          <div className="flex items-center justify-between px-3 pb-1">
+            <Link
+              href="/debug-log"
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              View all <ExternalLink className="size-2.5" />
+            </Link>
+            {logs.length > 0 && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -117,8 +125,8 @@ export function DebugLogPanel() {
                 <Trash2 className="size-3" />
                 Clear
               </Button>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="max-h-52 overflow-y-auto px-2 pb-2 scrollbar-thin">
             {logs.length === 0 ? (

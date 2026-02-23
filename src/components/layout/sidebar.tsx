@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  Bug,
   LayoutDashboard,
   Plus,
   Settings,
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/monitors/new", label: "Add Monitor", icon: Plus },
   { href: "/sync", label: "Sync", icon: RefreshCw },
+  { href: "/debug-log", label: "Debug Log", icon: Bug },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

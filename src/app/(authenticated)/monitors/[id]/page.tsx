@@ -83,6 +83,11 @@ interface ChecksResponse {
 type StatusFilter = "all" | "up" | "down";
 const PAGE_SIZE = 50;
 
+interface TimeFilter {
+  from: string | null;
+  to: string | null;
+}
+
 function getStatusBadge(monitor: Monitor) {
   if (!monitor.active) {
     return <Badge className="bg-[var(--color-status-pending)] text-white">PENDING</Badge>;
@@ -145,6 +150,14 @@ function formatDateShort(date: Date): string {
   });
 }
 
+function formatTimeShort(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 // ─── Checks Table with Pagination ────────────────────────────────────────────
 
 function applyTime(date: Date, time: string): Date {
@@ -154,7 +167,15 @@ function applyTime(date: Date, time: string): Date {
   return d;
 }
 
-function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
+function PaginatedChecksTable({
+  monitorId,
+  chartFilter,
+  onClearChartFilter,
+}: {
+  monitorId: string;
+  chartFilter: TimeFilter;
+  onClearChartFilter: () => void;
+}) {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -174,25 +195,34 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
   const retentionDays = parseInt(settings?.retentionDays ?? "90", 10);
   const earliestDate = new Date(Date.now() - retentionDays * 86_400_000);
 
+  const hasChartFilter = !!(chartFilter.from && chartFilter.to);
+  const hasCalendarFilter = !!dateRange?.from;
+  const activeSource = hasChartFilter ? "chart" : hasCalendarFilter ? "calendar" : "default";
+
   const buildUrl = useCallback(() => {
     const params = new URLSearchParams();
     params.set("page", String(page));
     params.set("limit", String(PAGE_SIZE));
     if (statusFilter !== "all") params.set("status", statusFilter);
-    if (dateRange?.from) {
-      params.set("from", applyTime(dateRange.from, fromTime).toISOString());
+
+    if (hasChartFilter) {
+      params.set("from", chartFilter.from!);
+      params.set("to", chartFilter.to!);
+    } else if (hasCalendarFilter) {
+      params.set("from", applyTime(dateRange!.from!, fromTime).toISOString());
+      if (dateRange!.to) {
+        params.set("to", applyTime(dateRange!.to, toTime).toISOString());
+      } else {
+        params.set("to", applyTime(dateRange!.from!, toTime).toISOString());
+      }
+    } else {
+      params.set("hours", "24");
     }
-    if (dateRange?.to) {
-      params.set("to", applyTime(dateRange.to, toTime).toISOString());
-    } else if (dateRange?.from) {
-      params.set("to", applyTime(dateRange.from, toTime).toISOString());
-    }
-    if (!dateRange?.from && !dateRange?.to) params.set("hours", "24");
     return `/api/monitors/${monitorId}/checks?${params}`;
-  }, [monitorId, page, statusFilter, dateRange, fromTime, toTime]);
+  }, [monitorId, page, statusFilter, chartFilter, dateRange, fromTime, toTime, hasChartFilter, hasCalendarFilter]);
 
   const { data, isLoading, isFetching } = useQuery<ChecksResponse>({
-    queryKey: ["monitor-checks", monitorId, page, statusFilter, dateRange?.from?.toISOString(), dateRange?.to?.toISOString(), fromTime, toTime],
+    queryKey: ["monitor-checks", monitorId, page, statusFilter, chartFilter.from, chartFilter.to, dateRange?.from?.toISOString(), dateRange?.to?.toISOString(), fromTime, toTime],
     queryFn: async () => {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error("Failed to fetch checks");
@@ -210,23 +240,36 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
 
   const handleDateSelect = (range: DateRange | undefined) => {
     setDateRange(range);
+    onClearChartFilter();
     setPage(1);
   };
 
-  const clearDateRange = () => {
+  const clearAll = () => {
     setDateRange(undefined);
     setFromTime("00:00");
     setToTime("23:59");
+    onClearChartFilter();
     setPage(1);
     setCalendarOpen(false);
   };
 
-  const hasDateFilter = !!dateRange?.from;
-  const dateLabel = hasDateFilter
-    ? dateRange.to
-      ? `${formatDateShort(dateRange.from!)} ${fromTime} – ${formatDateShort(dateRange.to)} ${toTime}`
-      : `${formatDateShort(dateRange.from!)} ${fromTime} – ${toTime}`
-    : "Last 24 hours";
+  // Reset page when chart filter changes
+  const [prevChartFrom, setPrevChartFrom] = useState(chartFilter.from);
+  if (chartFilter.from !== prevChartFrom) {
+    setPrevChartFrom(chartFilter.from);
+    setPage(1);
+  }
+
+  let filterLabel: string;
+  if (hasChartFilter) {
+    filterLabel = `${formatTimeShort(chartFilter.from!)} – ${formatTimeShort(chartFilter.to!)} (chart selection)`;
+  } else if (hasCalendarFilter) {
+    filterLabel = dateRange!.to
+      ? `${formatDateShort(dateRange!.from!)} ${fromTime} – ${formatDateShort(dateRange!.to)} ${toTime}`
+      : `${formatDateShort(dateRange!.from!)} ${fromTime} – ${toTime}`;
+  } else {
+    filterLabel = "Last 24 hours";
+  }
 
   return (
     <Card>
@@ -251,16 +294,16 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
                 <Button
-                  variant={hasDateFilter ? "default" : "outline"}
+                  variant={activeSource === "calendar" ? "default" : "outline"}
                   size="sm"
                   className="gap-2 font-mono text-xs"
                 >
                   <CalendarIcon className="size-3.5" />
-                  {dateLabel}
+                  {hasChartFilter ? "Pick dates…" : filterLabel}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -292,31 +335,27 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
                   </div>
                 </div>
                 <div className="flex items-center justify-between border-t px-3 py-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs"
-                    onClick={clearDateRange}
-                  >
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={clearAll}>
                     Reset to last 24h
                   </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => setCalendarOpen(false)}
-                  >
+                  <Button size="sm" className="text-xs" onClick={() => setCalendarOpen(false)}>
                     Done
                   </Button>
                 </div>
               </PopoverContent>
             </Popover>
-            {hasDateFilter && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={clearDateRange}
-              >
+
+            {hasChartFilter && (
+              <Badge variant="secondary" className="gap-1.5 font-mono text-xs py-1">
+                {filterLabel}
+                <button onClick={onClearChartFilter} className="ml-1 rounded-full p-0.5 hover:bg-destructive/20">
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            )}
+
+            {(hasCalendarFilter || hasChartFilter) && !hasChartFilter && (
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={clearAll}>
                 <X className="size-3.5" />
               </Button>
             )}
@@ -379,43 +418,17 @@ function PaginatedChecksTable({ monitorId }: { monitorId: string }) {
               Page {pagination.page} of {pagination.pages}
             </p>
             <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => setPage(1)}
-                disabled={pagination.page <= 1}
-              >
+              <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setPage(1)} disabled={pagination.page <= 1}>
                 <ChevronsLeft className="size-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={pagination.page <= 1}
-              >
+              <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={pagination.page <= 1}>
                 <ChevronLeft className="size-4" />
               </Button>
-              <span className="px-2 font-mono text-sm">
-                {pagination.page}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
-                disabled={pagination.page >= pagination.pages}
-              >
+              <span className="px-2 font-mono text-sm">{pagination.page}</span>
+              <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))} disabled={pagination.page >= pagination.pages}>
                 <ChevronRight className="size-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => setPage(pagination.pages)}
-                disabled={pagination.page >= pagination.pages}
-              >
+              <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setPage(pagination.pages)} disabled={pagination.page >= pagination.pages}>
                 <ChevronsRight className="size-4" />
               </Button>
             </div>
@@ -433,6 +446,8 @@ export default function MonitorDetailPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const id = params.id;
+
+  const [chartFilter, setChartFilter] = useState<TimeFilter>({ from: null, to: null });
 
   const { data: monitor, isLoading } = useQuery<Monitor>({
     queryKey: ["monitor", id],
@@ -453,6 +468,14 @@ export default function MonitorDetailPage() {
     },
     enabled: !!id,
   });
+
+  const handleChartRangeSelect = useCallback((from: string, to: string) => {
+    setChartFilter({ from, to });
+  }, []);
+
+  const clearChartFilter = useCallback(() => {
+    setChartFilter({ from: null, to: null });
+  }, []);
 
   const toggleActive = useMutation({
     mutationFn: async (active: boolean) => {
@@ -517,19 +540,12 @@ export default function MonitorDetailPage() {
   const chartChecks = chartChecksData?.checks ?? [];
   const uptimeData = generateUptimeData(chartChecks);
   const chartData = chartChecks
-    .map((c) => ({
-      checkedAt: c.checkedAt,
-      responseTime: c.responseTime,
-      isUp: c.isUp,
-    }))
+    .map((c) => ({ checkedAt: c.checkedAt, responseTime: c.responseTime, isUp: c.isUp }))
     .reverse();
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-      >
+      <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" />
         Dashboard
       </Link>
@@ -564,24 +580,35 @@ export default function MonitorDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="font-mono">Response Time</CardTitle>
-          <CardDescription>Last 24 hours</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="font-mono">Response Time</CardTitle>
+              <CardDescription>Last 24 hours — drag to select a time range</CardDescription>
+            </div>
+            {chartFilter.from && (
+              <Button variant="outline" size="sm" className="gap-1.5 font-mono text-xs" onClick={clearChartFilter}>
+                <X className="size-3" />
+                Clear selection
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          <ResponseChart data={chartData} />
+          <ResponseChart data={chartData} onRangeSelect={handleChartRangeSelect} />
         </CardContent>
       </Card>
 
-      <PaginatedChecksTable monitorId={id} />
+      <PaginatedChecksTable
+        monitorId={id}
+        chartFilter={chartFilter}
+        onClearChartFilter={clearChartFilter}
+      />
 
       <div className="flex gap-2">
         <Button asChild>
           <Link href={`/monitors/${id}/edit`}>Edit</Link>
         </Button>
-        <Button
-          variant="destructive"
-          onClick={() => setDeleteDialogOpen(true)}
-        >
+        <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
           Delete
         </Button>
         <Button
@@ -603,20 +630,8 @@ export default function MonitorDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                deleteMonitor.mutate();
-                setDeleteDialogOpen(false);
-              }}
-              disabled={deleteMonitor.isPending}
-            >
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { deleteMonitor.mutate(); setDeleteDialogOpen(false); }} disabled={deleteMonitor.isPending}>
               Delete
             </Button>
           </DialogFooter>
@@ -632,20 +647,8 @@ export default function MonitorDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setBanDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                banAndDelete.mutate();
-                setBanDialogOpen(false);
-              }}
-              disabled={banAndDelete.isPending}
-            >
+            <Button variant="outline" onClick={() => setBanDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { banAndDelete.mutate(); setBanDialogOpen(false); }} disabled={banAndDelete.isPending}>
               <Ban className="size-4" />
               Ban &amp; Delete
             </Button>
