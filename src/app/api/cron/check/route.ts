@@ -167,8 +167,8 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Now handle recoveries -- notifiedAt is guaranteed to be set if the
-  // delayed send already fired, so recovery notifications will be sent.
+  // Handle recoveries — send both DOWN and UP if the delay hadn't fired yet,
+  // so short-lived outages are never silently swallowed.
   for (const { monitor, result } of stateChanges) {
     if (result.isUp) {
       const openIncident = await prisma.incident.findFirst({
@@ -176,21 +176,30 @@ export async function POST(request: NextRequest) {
         orderBy: { startedAt: "desc" },
       });
       if (openIncident) {
+        const resolvedAt = new Date();
         await prisma.incident.update({
           where: { id: openIncident.id },
-          data: { resolvedAt: new Date() },
+          data: { resolvedAt, notifiedAt: openIncident.notifiedAt ?? resolvedAt },
         });
         await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
-        if (openIncident.notifiedAt) {
+        if (!openIncident.notifiedAt) {
           await sendNotifications({
             monitorName: monitor.name,
             monitorUrl: monitor.url,
-            status: "up",
-            message: `${monitor.name} is back UP (${result.responseTime}ms)`,
-            timestamp: new Date().toISOString(),
+            status: "down",
+            message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
+            timestamp: openIncident.startedAt.toISOString(),
           });
         }
+
+        await sendNotifications({
+          monitorName: monitor.name,
+          monitorUrl: monitor.url,
+          status: "up",
+          message: `${monitor.name} is back UP (${result.responseTime}ms)`,
+          timestamp: new Date().toISOString(),
+        });
       }
     }
   }
