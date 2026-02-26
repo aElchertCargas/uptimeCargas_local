@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
 import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
+import { createZendeskTicket } from "@/lib/zendesk";
 
 export const maxDuration = 120;
 
@@ -18,6 +19,51 @@ async function getAlertDelay(): Promise<number> {
     where: { key: "alertDelaySeconds" },
   });
   return row ? parseInt(row.value, 10) || 300 : 300;
+}
+
+interface ZendeskSettings {
+  enabled: boolean;
+  subdomain: string;
+  email: string;
+  apiToken: string;
+  groupId: string;
+  delayMinutes: number;
+  subjectTemplate: string;
+  bodyTemplate: string;
+}
+
+async function getZendeskSettings(): Promise<ZendeskSettings> {
+  const rows = await prisma.appSetting.findMany({
+    where: {
+      key: {
+        in: [
+          "zendeskEnabled",
+          "zendeskSubdomain",
+          "zendeskEmail",
+          "zendeskApiToken",
+          "zendeskGroupId",
+          "zendeskTicketDelayMinutes",
+          "zendeskSubjectTemplate",
+          "zendeskBodyTemplate",
+        ],
+      },
+    },
+  });
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  return {
+    enabled: map.get("zendeskEnabled") === "true",
+    subdomain: map.get("zendeskSubdomain") ?? "",
+    email: map.get("zendeskEmail") ?? "",
+    apiToken: map.get("zendeskApiToken") ?? "",
+    groupId: map.get("zendeskGroupId") ?? "",
+    delayMinutes: parseInt(map.get("zendeskTicketDelayMinutes") ?? "30", 10) || 30,
+    subjectTemplate:
+      map.get("zendeskSubjectTemplate") ??
+      "{{monitorName}} is DOWN ({{downtimeMinutes}} min)",
+    bodyTemplate:
+      map.get("zendeskBodyTemplate") ??
+      "Monitor: {{monitorName}}\nURL: {{monitorUrl}}\nDown since: {{timestamp}}\nDuration: {{downtimeMinutes}} minutes\n\nError: {{message}}",
+  };
 }
 
 async function sendNotifications(payload: NotificationPayload) {
@@ -204,9 +250,70 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Create Zendesk tickets for long-running incidents that don't have one yet.
+  let zendeskTicketsCreated = 0;
+  const zendeskSettings = await getZendeskSettings();
+  if (
+    zendeskSettings.enabled &&
+    zendeskSettings.subdomain &&
+    zendeskSettings.email &&
+    zendeskSettings.apiToken &&
+    zendeskSettings.groupId
+  ) {
+    const zendeskCutoff = new Date(
+      now - zendeskSettings.delayMinutes * 60 * 1000
+    );
+    const unticketedIncidents = await prisma.incident.findMany({
+      where: {
+        resolvedAt: null,
+        zendeskTicketId: null,
+        startedAt: { lte: zendeskCutoff },
+      },
+      include: { monitor: true },
+    });
+
+    for (const incident of unticketedIncidents) {
+      const downtimeMinutes = Math.floor(
+        (now - incident.startedAt.getTime()) / 60000
+      );
+      const ticketId = await createZendeskTicket(
+        {
+          subdomain: zendeskSettings.subdomain,
+          email: zendeskSettings.email,
+          apiToken: zendeskSettings.apiToken,
+          groupId: zendeskSettings.groupId,
+        },
+        zendeskSettings.subjectTemplate,
+        zendeskSettings.bodyTemplate,
+        {
+          monitorName: incident.monitor.name,
+          monitorUrl: incident.monitor.url,
+          message: incident.message ?? "No error details available",
+          timestamp: incident.startedAt.toISOString(),
+          downtimeMinutes,
+        }
+      );
+
+      if (ticketId) {
+        await prisma.incident.update({
+          where: { id: incident.id },
+          data: { zendeskTicketId: ticketId },
+        });
+        await writeDebugLog(
+          "zendesk_ticket",
+          incident.monitor.name,
+          "zendesk",
+          `Zendesk ticket #${ticketId} created after ${downtimeMinutes} min of downtime`
+        ).catch(() => {});
+        zendeskTicketsCreated++;
+      }
+    }
+  }
+
   return NextResponse.json({
     checked: pendingInserts.length,
     notified: pendingIncidents.length,
+    zendeskTicketsCreated,
     results: pendingInserts.map((r) => ({
       monitorId: r.monitorId,
       isUp: r.isUp,
