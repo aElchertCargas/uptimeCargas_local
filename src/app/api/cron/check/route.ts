@@ -299,11 +299,12 @@ export async function POST(request: NextRequest) {
           where: { id: incident.id },
           data: { zendeskTicketId: ticketId },
         });
+        const ticketUrl = `https://${zendeskSettings.subdomain}.zendesk.com/agent/tickets/${ticketId}`;
         await writeDebugLog(
           "zendesk_ticket",
           incident.monitor.name,
           "zendesk",
-          `Zendesk ticket #${ticketId} created after ${downtimeMinutes} min of downtime`
+          `Zendesk ticket #${ticketId} created after ${downtimeMinutes} min of downtime — ${ticketUrl}`
         ).catch(() => {});
         zendeskTicketsCreated++;
       }

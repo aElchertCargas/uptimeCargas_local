@@ -1785,6 +1785,25 @@ function ZendeskSection() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
 
+  const testTicketMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/zendesk/test-ticket", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create test ticket");
+      return data as { ticketId: string; ticketUrl: string };
+    },
+    onSuccess: (data) => {
+      toast.success(
+        <span>
+          Test ticket <a href={data.ticketUrl} target="_blank" rel="noopener noreferrer" className="underline font-medium">#{data.ticketId}</a> created
+        </span>
+      );
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const handleTestTicket = () => testTicketMutation.mutate();
+
   const handleSave = () => {
     const delay = parseInt(delayMinutes, 10);
     if (isNaN(delay) || delay < 1) {
@@ -1963,10 +1982,21 @@ function ZendeskSection() {
             </p>
           </div>
 
-          <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>
-            {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
-            Save Zendesk Settings
-          </Button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>
+              {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Save Zendesk Settings
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTestTicket}
+              disabled={testTicketMutation.isPending || isLoading}
+            >
+              {testTicketMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Make Test Ticket
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </>
