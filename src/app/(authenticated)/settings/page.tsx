@@ -1689,6 +1689,36 @@ function ZendeskSection() {
   const [bodyTemplate, setBodyTemplate] = useState("");
   const [initialized, setInitialized] = useState(false);
 
+  const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+
+  const fetchGroups = async () => {
+    if (!subdomain.trim() || !email.trim() || !apiToken.trim()) {
+      toast.error("Enter subdomain, email, and API token first");
+      return;
+    }
+    setGroupsLoading(true);
+    setGroupsError(null);
+    try {
+      const res = await fetch("/api/zendesk/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subdomain: subdomain.trim(), email: email.trim(), apiToken: apiToken.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch groups");
+      setGroups(data.groups ?? []);
+      if ((data.groups ?? []).length === 0) toast.error("No groups found in this Zendesk account");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to fetch groups";
+      setGroupsError(msg);
+      toast.error(msg);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
+
   if (settings && !initialized) {
     setEnabled(settings.zendeskEnabled === "true");
     setSubdomain(settings.zendeskSubdomain ?? "");
@@ -1699,6 +1729,33 @@ function ZendeskSection() {
     setSubjectTemplate(settings.zendeskSubjectTemplate ?? DEFAULT_ZENDESK_SUBJECT);
     setBodyTemplate(settings.zendeskBodyTemplate ?? DEFAULT_ZENDESK_BODY);
     setInitialized(true);
+
+    // Auto-load groups if credentials are already saved so the Select renders correctly.
+    const sd = settings.zendeskSubdomain ?? "";
+    const em = settings.zendeskEmail ?? "";
+    const at = settings.zendeskApiToken ?? "";
+    const savedGroupId = settings.zendeskGroupId ?? "";
+    if (sd && em && at) {
+      fetch("/api/zendesk/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subdomain: sd, email: em, apiToken: at }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.groups?.length) {
+            setGroups(data.groups);
+          } else if (savedGroupId) {
+            // Fall back to a stub entry so the saved value still displays.
+            setGroups([{ id: parseInt(savedGroupId, 10), name: `Group ${savedGroupId}` }]);
+          }
+        })
+        .catch(() => {
+          if (savedGroupId) {
+            setGroups([{ id: parseInt(savedGroupId, 10), name: `Group ${savedGroupId}` }]);
+          }
+        });
+    }
   }
 
   const saveMutation = useMutation({
@@ -1780,17 +1837,48 @@ function ZendeskSection() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="zendesk-group-id">Group ID</Label>
-              <Input
-                id="zendesk-group-id"
-                value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}
-                placeholder="e.g. 12345678"
-                className="font-mono"
-                disabled={isLoading}
-              />
+              <Label>Group</Label>
+              <div className="flex gap-2">
+                <Select
+                  value={groupId}
+                  onValueChange={setGroupId}
+                  disabled={isLoading || groups.length === 0}
+                >
+                  <SelectTrigger className="flex-1 font-mono">
+                    <SelectValue
+                      placeholder={
+                        groups.length === 0
+                          ? "Load groups first →"
+                          : "Select a group"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={String(g.id)}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={fetchGroups}
+                  disabled={groupsLoading || isLoading}
+                >
+                  {groupsLoading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    "Load"
+                  )}
+                </Button>
+              </div>
+              {groupsError && (
+                <p className="text-xs text-destructive">{groupsError}</p>
+              )}
               <p className="text-xs text-muted-foreground">
-                Numeric ID of the &quot;Energy Customer Support&quot; group
+                Click Load after entering your credentials to fetch available groups.
               </p>
             </div>
             <div className="space-y-2">
