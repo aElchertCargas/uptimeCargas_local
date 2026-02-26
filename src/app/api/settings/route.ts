@@ -7,6 +7,21 @@ const DEFAULTS: Record<string, string> = {
   alertDelaySeconds: "300",
   debugLogEnabled: "true",
   sslAlertDays: "1",
+  zendeskEnabled: "false",
+  zendeskSubdomain: "",
+  zendeskEmail: "",
+  zendeskApiToken: "",
+  zendeskGroupId: "",
+  zendeskTicketDelayMinutes: "30",
+  zendeskSubjectTemplate: "{{monitorName}} is DOWN ({{downtimeMinutes}} min)",
+  zendeskBodyTemplate: `Monitor: {{monitorName}}
+URL: {{monitorUrl}}
+Down since: {{timestamp}}
+Duration: {{downtimeMinutes}} minutes
+
+Error: {{message}}
+
+This ticket was automatically created by the uptime monitor.`,
 };
 
 export async function GET() {

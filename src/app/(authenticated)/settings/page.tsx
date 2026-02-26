@@ -1655,6 +1655,226 @@ function DebugLogSection() {
   );
 }
 
+// ─── Zendesk Section ─────────────────────────────────────────────────────────
+
+const DEFAULT_ZENDESK_SUBJECT = "{{monitorName}} is DOWN ({{downtimeMinutes}} min)";
+const DEFAULT_ZENDESK_BODY = `Monitor: {{monitorName}}
+URL: {{monitorUrl}}
+Down since: {{timestamp}}
+Duration: {{downtimeMinutes}} minutes
+
+Error: {{message}}
+
+This ticket was automatically created by the uptime monitor.`;
+
+function ZendeskSection() {
+  const queryClient = useQueryClient();
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const [enabled, setEnabled] = useState(false);
+  const [subdomain, setSubdomain] = useState("");
+  const [email, setEmail] = useState("");
+  const [apiToken, setApiToken] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [delayMinutes, setDelayMinutes] = useState("");
+  const [subjectTemplate, setSubjectTemplate] = useState("");
+  const [bodyTemplate, setBodyTemplate] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  if (settings && !initialized) {
+    setEnabled(settings.zendeskEnabled === "true");
+    setSubdomain(settings.zendeskSubdomain ?? "");
+    setEmail(settings.zendeskEmail ?? "");
+    setApiToken(settings.zendeskApiToken ?? "");
+    setGroupId(settings.zendeskGroupId ?? "");
+    setDelayMinutes(settings.zendeskTicketDelayMinutes ?? "30");
+    setSubjectTemplate(settings.zendeskSubjectTemplate ?? DEFAULT_ZENDESK_SUBJECT);
+    setBodyTemplate(settings.zendeskBodyTemplate ?? DEFAULT_ZENDESK_BODY);
+    setInitialized(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async (data: Record<string, string>) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success("Zendesk settings saved");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const handleSave = () => {
+    const delay = parseInt(delayMinutes, 10);
+    if (isNaN(delay) || delay < 1) {
+      toast.error("Ticket delay must be at least 1 minute");
+      return;
+    }
+    if (enabled && (!subdomain.trim() || !email.trim() || !apiToken.trim() || !groupId.trim())) {
+      toast.error("Subdomain, email, API token, and group ID are required when Zendesk is enabled");
+      return;
+    }
+    saveMutation.mutate({
+      zendeskEnabled: String(enabled),
+      zendeskSubdomain: subdomain.trim(),
+      zendeskEmail: email.trim(),
+      zendeskApiToken: apiToken.trim(),
+      zendeskGroupId: groupId.trim(),
+      zendeskTicketDelayMinutes: String(delay),
+      zendeskSubjectTemplate: subjectTemplate || DEFAULT_ZENDESK_SUBJECT,
+      zendeskBodyTemplate: bodyTemplate || DEFAULT_ZENDESK_BODY,
+    });
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">Zendesk Integration</h2>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Auto-Create Tickets for Prolonged Outages</CardTitle>
+          <CardDescription>
+            Automatically open a Zendesk ticket in the Energy Customer Support group when a site has been down for the configured duration.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="zendesk-enabled"
+              checked={enabled}
+              onCheckedChange={setEnabled}
+              disabled={isLoading}
+            />
+            <Label htmlFor="zendesk-enabled">
+              {enabled ? "Zendesk integration enabled" : "Zendesk integration disabled"}
+            </Label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="zendesk-subdomain">Subdomain</Label>
+              <Input
+                id="zendesk-subdomain"
+                value={subdomain}
+                onChange={(e) => setSubdomain(e.target.value)}
+                placeholder="yourcompany"
+                disabled={isLoading}
+              />
+              <p className="text-xs text-muted-foreground">
+                The part before <span className="font-mono">.zendesk.com</span>
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="zendesk-group-id">Group ID</Label>
+              <Input
+                id="zendesk-group-id"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                placeholder="e.g. 12345678"
+                className="font-mono"
+                disabled={isLoading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Numeric ID of the &quot;Energy Customer Support&quot; group
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="zendesk-email">Agent Email</Label>
+              <Input
+                id="zendesk-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="agent@company.com"
+                disabled={isLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="zendesk-api-token">API Token</Label>
+              <Input
+                id="zendesk-api-token"
+                type="password"
+                value={apiToken}
+                onChange={(e) => setApiToken(e.target.value)}
+                placeholder="Your Zendesk API token"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="zendesk-delay">Ticket Delay (minutes)</Label>
+            <Input
+              id="zendesk-delay"
+              type="number"
+              min={1}
+              className="w-32 font-mono"
+              value={delayMinutes}
+              onChange={(e) => setDelayMinutes(e.target.value)}
+              placeholder="30"
+              disabled={isLoading}
+            />
+            <p className="text-xs text-muted-foreground">
+              A ticket is created only after a site has been continuously down for this many minutes.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="zendesk-subject">Ticket Subject Template</Label>
+            <Input
+              id="zendesk-subject"
+              value={subjectTemplate}
+              onChange={(e) => setSubjectTemplate(e.target.value)}
+              placeholder={DEFAULT_ZENDESK_SUBJECT}
+              disabled={isLoading}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="zendesk-body">Ticket Body Template</Label>
+            <Textarea
+              id="zendesk-body"
+              value={bodyTemplate}
+              onChange={(e) => setBodyTemplate(e.target.value)}
+              placeholder={DEFAULT_ZENDESK_BODY}
+              className="min-h-[160px] font-mono text-xs"
+              disabled={isLoading}
+            />
+            <p className="text-xs text-muted-foreground">
+              Available placeholders:{" "}
+              <span className="font-mono">{"{{monitorName}}"}</span>,{" "}
+              <span className="font-mono">{"{{monitorUrl}}"}</span>,{" "}
+              <span className="font-mono">{"{{message}}"}</span>,{" "}
+              <span className="font-mono">{"{{timestamp}}"}</span>,{" "}
+              <span className="font-mono">{"{{downtimeMinutes}}"}</span>
+            </p>
+          </div>
+
+          <Button onClick={handleSave} disabled={saveMutation.isPending || isLoading}>
+            {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+            Save Zendesk Settings
+          </Button>
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
 // ─── Settings Page ───────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1754,6 +1974,12 @@ export default function SettingsPage() {
 
       {/* SSL Certificate Alerts */}
       <SslAlertSection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
+
+      {/* Zendesk Integration */}
+      <ZendeskSection />
 
       {/* Divider */}
       <div className="border-t border-border" />

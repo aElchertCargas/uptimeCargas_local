@@ -60,13 +60,14 @@ model NotificationChannel {
 }
 
 model Incident {
-  id         String    @id @default(cuid())
-  monitorId  String
-  monitor    Monitor   @relation(fields: [monitorId], references: [id], onDelete: Cascade)
-  startedAt  DateTime  @default(now())
-  resolvedAt DateTime?
-  notifiedAt DateTime?
-  message    String?
+  id              String    @id @default(cuid())
+  monitorId       String
+  monitor         Monitor   @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  startedAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+  notifiedAt      DateTime?
+  message         String?
+  zendeskTicketId String?
 
   @@index([monitorId, startedAt])
 }
