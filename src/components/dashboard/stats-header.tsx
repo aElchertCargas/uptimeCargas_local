@@ -17,6 +17,8 @@ export interface StatsSummary {
 
 interface StatsHeaderProps {
   summary: StatsSummary;
+  onDownClick?: () => void;
+  onUpClick?: () => void;
 }
 
 const statCards: {
@@ -40,13 +42,20 @@ const statCards: {
   },
 ];
 
-export function StatsHeader({ summary }: StatsHeaderProps) {
+export function StatsHeader({ summary, onDownClick, onUpClick }: StatsHeaderProps) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {statCards.map(({ key, label, icon: Icon, colorClass, glowClass, pulseClass }) => {
         const count = summary[key];
         const isDownCard = key === "down";
+        const isUpCard = key === "up";
         const showAlert = isDownCard && count > 0;
+        const isClickable = (isDownCard || isUpCard) && count > 0;
+        
+        const handleClick = () => {
+          if (isDownCard && onDownClick) onDownClick();
+          if (isUpCard && onUpClick) onUpClick();
+        };
 
         return (
           <Card
@@ -54,8 +63,11 @@ export function StatsHeader({ summary }: StatsHeaderProps) {
             className={cn(
               "transition-shadow",
               showAlert && glowClass,
-              showAlert && pulseClass
+              showAlert && pulseClass,
+              isDownCard && count > 0 && "cursor-pointer hover:ring-2 hover:ring-[var(--color-status-down)]/50",
+              isUpCard && count > 0 && "cursor-pointer hover:ring-2 hover:ring-[var(--color-status-up)]/50"
             )}
+            onClick={isClickable ? handleClick : undefined}
           >
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
               <span className="text-muted-foreground text-sm font-medium">

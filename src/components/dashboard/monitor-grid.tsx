@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 interface MonitorGridProps {
   monitors: MonitorData[];
+  initialStatusFilter?: StatusFilter;
 }
 
 type StatusFilter = "all" | "up" | "down" | "pending";
@@ -71,13 +72,17 @@ function groupByLetter(monitors: MonitorData[]): Map<string, MonitorData[]> {
 
 type BulkAction = "delete" | "ban-delete" | "check" | null;
 
-export function MonitorGrid({ monitors }: MonitorGridProps) {
+export function MonitorGrid({ monitors, initialStatusFilter = "all" }: MonitorGridProps) {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmAction, setConfirmAction] = useState<BulkAction>(null);
+
+  useEffect(() => {
+    setStatusFilter(initialStatusFilter);
+  }, [initialStatusFilter]);
 
   const filteredMonitors = useMemo(
     () => filterMonitors(monitors, searchQuery, statusFilter),

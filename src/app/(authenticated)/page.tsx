@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { StatsHeader, type StatsSummary } from "@/components/dashboard/stats-header";
 import { MonitorGrid } from "@/components/dashboard/monitor-grid";
@@ -25,6 +26,7 @@ function formatTime(date: Date): string {
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down" | "pending">("all");
 
   const { data, isLoading, dataUpdatedAt } = useQuery<StatsResponse>({
     queryKey: ["stats"],
@@ -99,8 +101,15 @@ export default function DashboardPage() {
         </div>
       ) : data ? (
         <>
-          <StatsHeader summary={data.summary} />
-          <MonitorGrid monitors={data.monitors} />
+          <StatsHeader 
+            summary={data.summary} 
+            onDownClick={() => setStatusFilter("down")}
+            onUpClick={() => setStatusFilter("up")}
+          />
+          <MonitorGrid 
+            monitors={data.monitors} 
+            initialStatusFilter={statusFilter}
+          />
         </>
       ) : (
         <div className="flex h-64 items-center justify-center rounded-lg border border-border">
