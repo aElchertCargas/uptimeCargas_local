@@ -11,6 +11,7 @@ import {
   Radio,
   RefreshCw,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/monitors/new", label: "Add Monitor", icon: Plus },
   { href: "/sync", label: "Sync", icon: RefreshCw },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/debug-log", label: "Debug Log", icon: Bug },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
