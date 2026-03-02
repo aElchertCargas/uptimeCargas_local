@@ -6,6 +6,7 @@ Internal uptime monitoring dashboard with authentication. Tracks HTTP endpoints,
 
 - **Secure Authentication**: NextAuth.js with username/password login (see [AUTH_SETUP.md](./AUTH_SETUP.md) for details)
 - **Monitor Management**: CRUD API for HTTP/HTTPS monitors
+- **Automated SSL Monitoring**: Daily certificate expiration checks with advance warnings
 - **API Sync**: Auto-sync monitors from Energy Customers API with exclusion patterns
 - **Notifications**: Webhook and Pushover alerts
 - **Performance**: Materialized stats, batch processing, configurable retention
@@ -101,6 +102,8 @@ npm run hash-password your-secure-password
 
 **Automated checks:** Set up a Railway cron job that POSTs to `/api/cron/check` with `Authorization: Bearer <CRON_SECRET>` every 60 seconds.
 
+**Note:** SSL certificate checks run automatically every 24 hours via the internal scheduler. No external cron setup required.
+
 ## API
 
 | Endpoint | Method | Description |
@@ -125,6 +128,8 @@ npm run hash-password your-secure-password
 | `/api/sync/bulk-delete` | POST | Bulk-delete stale monitors |
 | `/api/stats` | GET | Dashboard stats |
 | `/api/cron/check` | POST | Trigger check cycle |
+| `/api/cron/cleanup` | POST | Trigger old check cleanup |
+| `/api/cron/ssl-check` | POST | Trigger SSL certificate check |
 
 ## Environment Variables
 
