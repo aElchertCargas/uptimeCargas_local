@@ -88,6 +88,12 @@ export async function createZendeskTicket(
             group_id: parseInt(config.groupId, 10),
             priority: "high",
             tags: ["uptime-monitor", "site-down"],
+            custom_fields: [
+              {
+                id: 38842256723213,
+                value: "irl_4",
+              },
+            ],
           },
         }),
       }
