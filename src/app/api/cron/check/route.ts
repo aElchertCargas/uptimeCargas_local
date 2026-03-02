@@ -263,11 +263,23 @@ export async function POST(request: NextRequest) {
     const zendeskCutoff = new Date(
       now - zendeskSettings.delayMinutes * 60 * 1000
     );
+    
+    // Get the timestamp when Zendesk was last enabled to avoid creating tickets for old incidents
+    const zendeskEnabledSetting = await prisma.appSetting.findUnique({
+      where: { key: "zendeskEnabledAt" },
+    });
+    const zendeskEnabledAt = zendeskEnabledSetting 
+      ? new Date(zendeskEnabledSetting.value)
+      : new Date(0); // If not set, allow all incidents (first-time setup)
+    
     const unticketedIncidents = await prisma.incident.findMany({
       where: {
         resolvedAt: null,
         zendeskTicketId: null,
-        startedAt: { lte: zendeskCutoff },
+        startedAt: { 
+          lte: zendeskCutoff,
+          gte: zendeskEnabledAt, // Only incidents after Zendesk was enabled
+        },
       },
       include: { monitor: true },
     });
