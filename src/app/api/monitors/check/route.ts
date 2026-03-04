@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
+import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
 
 export const maxDuration = 120;
 
@@ -10,6 +11,17 @@ interface CheckRecord {
   responseTime: number;
   isUp: boolean;
   message: string | null;
+}
+
+async function sendNotifications(payload: NotificationPayload) {
+  const channels = await prisma.notificationChannel.findMany({
+    where: { enabled: true },
+  });
+  await Promise.allSettled(
+    channels.map((ch) =>
+      dispatchNotification(ch.type, ch.name, ch.config as Record<string, unknown>, payload)
+    )
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -103,6 +115,58 @@ export async function POST(request: NextRequest) {
         });
       })
     );
+  }
+
+  // Handle state changes so manual "Check now" also creates/resolves incidents and sends notifications
+  for (const { monitor, result } of stateChanges) {
+    if (!result.isUp) {
+      const existingOpen = await prisma.incident.findFirst({
+        where: { monitorId: monitor.id, resolvedAt: null },
+      });
+      if (!existingOpen) {
+        await prisma.incident.create({
+          data: { monitorId: monitor.id, message: result.message },
+        });
+        await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
+      }
+    }
+  }
+
+  for (const { monitor, result } of stateChanges) {
+    if (result.isUp) {
+      const openIncident = await prisma.incident.findFirst({
+        where: { monitorId: monitor.id, resolvedAt: null },
+        orderBy: { startedAt: "desc" },
+      });
+      if (!openIncident) continue;
+
+      const resolvedAt = new Date();
+      const notifiedAt = openIncident.notifiedAt ?? resolvedAt;
+      const updateResult = await prisma.incident.updateMany({
+        where: { id: openIncident.id, resolvedAt: null },
+        data: { resolvedAt, notifiedAt },
+      });
+      if (updateResult.count === 0) continue;
+
+      await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
+
+      if (!openIncident.notifiedAt) {
+        await sendNotifications({
+          monitorName: monitor.name,
+          monitorUrl: monitor.url,
+          status: "down",
+          message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
+          timestamp: openIncident.startedAt.toISOString(),
+        });
+      }
+      await sendNotifications({
+        monitorName: monitor.name,
+        monitorUrl: monitor.url,
+        status: "up",
+        message: `${monitor.name} is back UP (${result.responseTime}ms)`,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   return NextResponse.json({

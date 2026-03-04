@@ -173,13 +173,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Create incidents for new down events (before delayed send so they're eligible)
+  // Create incidents for new down events only when there's no open incident
+  // (one DOWN per contiguous downtime; no duplicate alerts while still down)
   for (const { monitor, result } of stateChanges) {
     if (!result.isUp) {
-      await prisma.incident.create({
-        data: { monitorId: monitor.id, message: result.message },
+      const existingOpen = await prisma.incident.findFirst({
+        where: { monitorId: monitor.id, resolvedAt: null },
       });
-      await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
+      if (!existingOpen) {
+        await prisma.incident.create({
+          data: { monitorId: monitor.id, message: result.message },
+        });
+        await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
+      }
     }
   }
 
@@ -213,40 +219,44 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Handle recoveries — send both DOWN and UP if the delay hadn't fired yet,
-  // so short-lived outages are never silently swallowed.
+  // Handle recoveries — only one run may resolve and send UP (atomic update).
+  // Send belated DOWN + UP if the delay hadn't fired yet so short outages aren't swallowed.
   for (const { monitor, result } of stateChanges) {
     if (result.isUp) {
       const openIncident = await prisma.incident.findFirst({
         where: { monitorId: monitor.id, resolvedAt: null },
         orderBy: { startedAt: "desc" },
       });
-      if (openIncident) {
-        const resolvedAt = new Date();
-        await prisma.incident.update({
-          where: { id: openIncident.id },
-          data: { resolvedAt, notifiedAt: openIncident.notifiedAt ?? resolvedAt },
-        });
-        await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
+      if (!openIncident) continue;
 
-        if (!openIncident.notifiedAt) {
-          await sendNotifications({
-            monitorName: monitor.name,
-            monitorUrl: monitor.url,
-            status: "down",
-            message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
-            timestamp: openIncident.startedAt.toISOString(),
-          });
-        }
+      const resolvedAt = new Date();
+      const notifiedAt = openIncident.notifiedAt ?? resolvedAt;
+      const updateResult = await prisma.incident.updateMany({
+        where: { id: openIncident.id, resolvedAt: null },
+        data: { resolvedAt, notifiedAt },
+      });
 
+      if (updateResult.count === 0) continue; // another run already resolved — only one UP per incident
+
+      await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
+
+      if (!openIncident.notifiedAt) {
         await sendNotifications({
           monitorName: monitor.name,
           monitorUrl: monitor.url,
-          status: "up",
-          message: `${monitor.name} is back UP (${result.responseTime}ms)`,
-          timestamp: new Date().toISOString(),
+          status: "down",
+          message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
+          timestamp: openIncident.startedAt.toISOString(),
         });
       }
+
+      await sendNotifications({
+        monitorName: monitor.name,
+        monitorUrl: monitor.url,
+        status: "up",
+        message: `${monitor.name} is back UP (${result.responseTime}ms)`,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 
