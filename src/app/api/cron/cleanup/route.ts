@@ -22,6 +22,21 @@ export async function POST(request: NextRequest) {
     where: { checkedAt: { lt: cutoff } },
   });
 
+  // Save last cleanup info for display in settings
+  const now = new Date();
+  await Promise.all([
+    prisma.appSetting.upsert({
+      where: { key: "lastCleanupAt" },
+      create: { key: "lastCleanupAt", value: now.toISOString() },
+      update: { value: now.toISOString() },
+    }),
+    prisma.appSetting.upsert({
+      where: { key: "lastCleanupCount" },
+      create: { key: "lastCleanupCount", value: String(deleted.count) },
+      update: { value: String(deleted.count) },
+    }),
+  ]);
+
   return NextResponse.json({
     deleted: deleted.count,
     retentionDays,

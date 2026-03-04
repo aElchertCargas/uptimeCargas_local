@@ -727,6 +727,7 @@ function DataRetentionSection() {
       return res.json();
     },
     onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
       toast.success(`Pruned ${data.deleted} old check(s)`);
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
@@ -787,9 +788,21 @@ function DataRetentionSection() {
             </Button>
           </div>
           {loaded && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Currently keeping <span className="font-mono font-medium">{currentDays}</span> days of check history.
-            </p>
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Currently keeping <span className="font-mono font-medium">{currentDays}</span> days of check history.
+              </p>
+              {settings?.lastCleanupAt && (
+                <p className="text-xs text-muted-foreground">
+                  Last pruned: <span className="font-mono font-medium">
+                    {new Date(settings.lastCleanupAt).toLocaleString()}
+                  </span>
+                  {settings?.lastCleanupCount && (
+                    <> — <span className="font-mono font-medium">{settings.lastCleanupCount}</span> check(s) removed</>
+                  )}
+                </p>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>
