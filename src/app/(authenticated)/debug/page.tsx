@@ -249,7 +249,6 @@ export default function DebugPage() {
                     </div>
                   );
                 })}
-              </div>
             </div>
           </CardContent>
         </Card>
