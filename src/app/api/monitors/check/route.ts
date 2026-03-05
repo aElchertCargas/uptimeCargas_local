@@ -158,6 +158,9 @@ export async function POST(request: NextRequest) {
           message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
           timestamp: openIncident.startedAt.toISOString(),
         });
+        // Small delay to ensure DOWN notification arrives before UP notification
+        // when both are sent in the same batch (prevents out-of-order alerts)
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
       await sendNotifications({
         monitorName: monitor.name,
