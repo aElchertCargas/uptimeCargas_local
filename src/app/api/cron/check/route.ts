@@ -263,6 +263,67 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Orphaned incident recovery: catch incidents missed when two concurrent scheduler
+  // instances both read monitor state before either commits results. The first instance
+  // correctly records DOWN; the second sees no state change (previouslyUp == isUp == UP)
+  // and skips the recovery loop entirely. This pass queries DB state after all writes
+  // are committed, so it always sees the true current state.
+  const orphanedIncidents = await prisma.incident.findMany({
+    where: { resolvedAt: null },
+    include: {
+      monitor: {
+        include: { checks: { orderBy: { checkedAt: "desc" }, take: 1 } },
+      },
+    },
+  });
+
+  for (const incident of orphanedIncidents) {
+    const latestCheck = incident.monitor.checks[0];
+    if (!latestCheck?.isUp) continue; // monitor still down, not an orphan yet
+    // Skip monitors already handled by the stateChanges recovery loop above
+    const alreadyHandled = stateChanges.some(
+      (sc) => sc.monitor.id === incident.monitorId && sc.result.isUp
+    );
+    if (alreadyHandled) continue;
+
+    const resolvedAt = latestCheck.checkedAt;
+    const notifiedAt = incident.notifiedAt ?? resolvedAt;
+    const updateResult = await prisma.incident.updateMany({
+      where: { id: incident.id, resolvedAt: null },
+      data: { resolvedAt, notifiedAt },
+    });
+    if (updateResult.count === 0) continue; // concurrent run resolved it first
+
+    await writeDebugLog(
+      "up",
+      incident.monitor.name,
+      null,
+      `${incident.monitor.name} recovered (orphaned incident resolved)`
+    );
+
+    if (!incident.notifiedAt) {
+      const duration = Math.round(
+        (resolvedAt.getTime() - incident.startedAt.getTime()) / 1000
+      );
+      await sendNotifications({
+        monitorName: incident.monitor.name,
+        monitorUrl: incident.monitor.url,
+        status: "down",
+        message: `${incident.monitor.name} was DOWN: ${incident.message} (recovered after ${duration}s)`,
+        timestamp: incident.startedAt.toISOString(),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    await sendNotifications({
+      monitorName: incident.monitor.name,
+      monitorUrl: incident.monitor.url,
+      status: "up",
+      message: `${incident.monitor.name} is back UP (${latestCheck.responseTime}ms)`,
+      timestamp: resolvedAt.toISOString(),
+    });
+  }
+
   // Create Zendesk tickets for long-running incidents that don't have one yet.
   let zendeskTicketsCreated = 0;
   const zendeskSettings = await getZendeskSettings();
