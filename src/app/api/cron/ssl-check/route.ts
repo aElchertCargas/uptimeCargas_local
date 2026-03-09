@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { checkSslCertificate, extractHostname } from "@/lib/ssl-checker";
+import { checkSslCertificate, parseSslTarget } from "@/lib/ssl-checker";
 import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
 
 export const maxDuration = 120;
@@ -35,7 +35,10 @@ export async function POST(request: NextRequest) {
     where: { active: true },
   });
 
-  const httpsMonitors = monitors.filter((m) => extractHostname(m.url) !== null);
+  const httpsMonitors = monitors.flatMap((monitor) => {
+    const target = parseSslTarget(monitor.url);
+    return target ? [{ monitor, target }] : [];
+  });
   const alertDays = await getSslAlertDays();
   const now = new Date();
   const oneDayAgo = new Date(now.getTime() - 86_400_000);
@@ -43,14 +46,14 @@ export async function POST(request: NextRequest) {
   let checked = 0;
   let alerted = 0;
 
-  for (const monitor of httpsMonitors) {
-    const hostname = extractHostname(monitor.url)!;
+  for (const { monitor, target } of httpsMonitors) {
+    const displayName = target.displayName;
 
     if (monitor.sslLastCheckedAt && monitor.sslLastCheckedAt > oneDayAgo) {
       continue;
     }
 
-    const result = await checkSslCertificate(hostname);
+    const result = await checkSslCertificate(target);
 
     if (!result) continue;
 
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
         "ssl_error",
         monitor.name,
         null,
-        `SSL check failed for ${hostname}: ${result.error}`
+        `SSL check failed for ${displayName}: ${result.error}`
       );
       continue;
     }
@@ -94,8 +97,8 @@ export async function POST(request: NextRequest) {
         });
 
         const message = result.daysRemaining <= 0
-          ? `SSL certificate for ${hostname} has EXPIRED (${expiryDate})`
-          : `SSL certificate for ${hostname} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
+          ? `SSL certificate for ${displayName} has EXPIRED (${expiryDate})`
+          : `SSL certificate for ${displayName} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
 
         await sendNotifications({
           monitorName: monitor.name,

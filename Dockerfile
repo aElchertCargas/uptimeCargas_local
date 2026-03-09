@@ -1,6 +1,8 @@
 # For local docker-compose only. Railway uses Railpack (see railway.json).
 FROM node:20-alpine
 
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

@@ -75,6 +75,8 @@ docker compose up
 
 Starts Postgres and the app. Uses the included `Dockerfile` for local builds. Railway deployments use Railpack instead (see `railway.json`).
 
+The app's SSL certificate monitor now shells out to the `openssl` CLI, so the runtime image must have `openssl` available on `PATH`.
+
 ## Deploy to Railway
 
 Railway uses **Railpack** to build this app (no Dockerfile required). The build runs `prisma generate` and `next build` automatically.
@@ -94,6 +96,8 @@ Railway uses **Railpack** to build this app (no Dockerfile required). The build 
    - `AUTH_USER_EMAIL` (admin email/username)
    - `AUTH_USER_PASSWORD_HASH` (bcrypt hash of your password)
 5. Deploy
+
+Make sure the deployed runtime includes the `openssl` CLI on `PATH`, since `/api/cron/ssl-check` uses `openssl s_client` to read certificate expiry data.
 
 **Generate a password hash:**
 ```bash
