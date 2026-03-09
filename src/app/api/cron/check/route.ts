@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
 import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
-import { createZendeskTicket } from "@/lib/zendesk";
+import { createZendeskTicket, updateZendeskTicket } from "@/lib/zendesk";
 
 export const maxDuration = 120;
 
@@ -30,6 +30,20 @@ interface ZendeskSettings {
   delayMinutes: number;
   subjectTemplate: string;
   bodyTemplate: string;
+}
+
+interface IncidentWithMonitor {
+  id: string;
+  startedAt: Date;
+  message: string | null;
+  notifiedAt: Date | null;
+  resolvedAt: Date | null;
+  zendeskTicketId: string | null;
+  monitorId: string;
+  monitor: {
+    name: string;
+    url: string;
+  };
 }
 
 async function getZendeskSettings(): Promise<ZendeskSettings> {
@@ -64,6 +78,60 @@ async function getZendeskSettings(): Promise<ZendeskSettings> {
       map.get("zendeskBodyTemplate") ??
       "Monitor: {{monitorName}}\nURL: {{monitorUrl}}\nDown since: {{timestamp}}\nDuration: {{downtimeMinutes}} minutes\n\nError: {{message}}",
   };
+}
+
+function hasZendeskConfig(settings: ZendeskSettings): boolean {
+  return Boolean(
+    settings.enabled &&
+      settings.subdomain &&
+      settings.email &&
+      settings.apiToken &&
+      settings.groupId
+  );
+}
+
+async function addZendeskRecoveryUpdate(
+  incident: IncidentWithMonitor,
+  zendeskSettings: ZendeskSettings,
+  resolvedAt: Date,
+  responseTimeMs: number
+) {
+  if (!incident.zendeskTicketId || !hasZendeskConfig(zendeskSettings)) {
+    return;
+  }
+
+  const downtimeMinutes = Math.max(
+    1,
+    Math.round((resolvedAt.getTime() - incident.startedAt.getTime()) / 60000)
+  );
+  const updated = await updateZendeskTicket(
+    {
+      subdomain: zendeskSettings.subdomain,
+      email: zendeskSettings.email,
+      apiToken: zendeskSettings.apiToken,
+      groupId: zendeskSettings.groupId,
+    },
+    incident.zendeskTicketId,
+    {
+      monitorName: incident.monitor.name,
+      monitorUrl: incident.monitor.url,
+      message: incident.message ?? "No error details available",
+      downTimestamp: incident.startedAt.toISOString(),
+      recoveredTimestamp: resolvedAt.toISOString(),
+      downtimeMinutes,
+      responseTimeMs,
+    }
+  );
+
+  const ticketUrl = `https://${zendeskSettings.subdomain}.zendesk.com/agent/tickets/${incident.zendeskTicketId}`;
+  await writeDebugLog(
+    updated ? "zendesk_ticket" : "zendesk_ticket_failed",
+    incident.monitor.name,
+    "zendesk",
+    updated
+      ? `Zendesk ticket #${incident.zendeskTicketId} updated with recovery note — ${ticketUrl}`
+      : `Failed to update Zendesk ticket #${incident.zendeskTicketId} with recovery note — ${ticketUrl}`
+  ).catch(() => {});
 }
 
 async function sendNotifications(payload: NotificationPayload) {
@@ -193,6 +261,7 @@ export async function POST(request: NextRequest) {
   // incidents resolved in this same cycle still get notifiedAt set first,
   // allowing the recovery handler to send the UP notification.
   const alertDelay = await getAlertDelay();
+  const zendeskSettings = await getZendeskSettings();
   const delayCutoff = new Date(now - alertDelay * 1000);
 
   const pendingIncidents = await prisma.incident.findMany({
@@ -237,6 +306,19 @@ export async function POST(request: NextRequest) {
       });
 
       if (updateResult.count === 0) continue; // another run already resolved — only one UP per incident
+
+      await addZendeskRecoveryUpdate(
+        {
+          ...openIncident,
+          monitor: {
+            name: monitor.name,
+            url: monitor.url,
+          },
+        },
+        zendeskSettings,
+        resolvedAt,
+        result.responseTime
+      );
 
       await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
@@ -294,6 +376,13 @@ export async function POST(request: NextRequest) {
     });
     if (updateResult.count === 0) continue; // concurrent run resolved it first
 
+    await addZendeskRecoveryUpdate(
+      incident,
+      zendeskSettings,
+      resolvedAt,
+      latestCheck.responseTime
+    );
+
     await writeDebugLog(
       "up",
       incident.monitor.name,
@@ -326,14 +415,7 @@ export async function POST(request: NextRequest) {
 
   // Create Zendesk tickets for long-running incidents that don't have one yet.
   let zendeskTicketsCreated = 0;
-  const zendeskSettings = await getZendeskSettings();
-  if (
-    zendeskSettings.enabled &&
-    zendeskSettings.subdomain &&
-    zendeskSettings.email &&
-    zendeskSettings.apiToken &&
-    zendeskSettings.groupId
-  ) {
+  if (hasZendeskConfig(zendeskSettings)) {
     const zendeskCutoff = new Date(
       now - zendeskSettings.delayMinutes * 60 * 1000
     );

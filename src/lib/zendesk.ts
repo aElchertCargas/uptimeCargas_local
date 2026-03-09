@@ -13,6 +13,16 @@ export interface ZendeskTicketPayload {
   downtimeMinutes: number;
 }
 
+export interface ZendeskRecoveryPayload {
+  monitorName: string;
+  monitorUrl: string;
+  message: string;
+  downTimestamp: string;
+  recoveredTimestamp: string;
+  downtimeMinutes: number;
+  responseTimeMs: number;
+}
+
 function toEST(isoTimestamp: string): string {
   return new Date(isoTimestamp).toLocaleString("en-US", {
     timeZone: "America/New_York",
@@ -59,6 +69,32 @@ export function interpolateZendeskTemplate(
     .replace(/\{\{downtimeMinutes\}\}/g, String(payload.downtimeMinutes));
 }
 
+function getZendeskHeaders(config: ZendeskConfig) {
+  const credentials = Buffer.from(
+    `${config.email}/token:${config.apiToken}`
+  ).toString("base64");
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Basic ${credentials}`,
+  };
+}
+
+function buildZendeskRecoveryComment(payload: ZendeskRecoveryPayload): string {
+  return `Recovery update from uptime monitor:
+
+Monitor: ${payload.monitorName}
+URL: ${payload.monitorUrl}
+Down since: ${toEST(payload.downTimestamp)}
+Recovered at: ${toEST(payload.recoveredTimestamp)}
+Duration: ${payload.downtimeMinutes} minutes
+Response time: ${payload.responseTimeMs} ms
+
+Original error: ${payload.message}
+
+The monitor is back up.`;
+}
+
 export async function createZendeskTicket(
   config: ZendeskConfig,
   subjectTemplate: string,
@@ -69,18 +105,11 @@ export async function createZendeskTicket(
     const subject = interpolateZendeskTemplate(subjectTemplate, payload);
     const body = interpolateZendeskTemplate(bodyTemplate, payload);
 
-    const credentials = Buffer.from(
-      `${config.email}/token:${config.apiToken}`
-    ).toString("base64");
-
     const response = await fetch(
       `https://${config.subdomain}.zendesk.com/api/v2/tickets.json`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${credentials}`,
-        },
+        headers: getZendeskHeaders(config),
         body: JSON.stringify({
           ticket: {
             subject,
@@ -110,5 +139,39 @@ export async function createZendeskTicket(
   } catch (err) {
     console.error("Failed to create Zendesk ticket:", err);
     return null;
+  }
+}
+
+export async function updateZendeskTicket(
+  config: ZendeskConfig,
+  ticketId: string,
+  payload: ZendeskRecoveryPayload
+): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `https://${config.subdomain}.zendesk.com/api/v2/tickets/${ticketId}.json`,
+      {
+        method: "PUT",
+        headers: getZendeskHeaders(config),
+        body: JSON.stringify({
+          ticket: {
+            comment: {
+              body: buildZendeskRecoveryComment(payload),
+            },
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text().catch(() => response.statusText);
+      console.error(`Zendesk API error ${response.status}: ${error}`);
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error("Failed to update Zendesk ticket:", err);
+    return false;
   }
 }
