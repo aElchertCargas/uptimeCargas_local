@@ -1049,13 +1049,15 @@ function SslAlertSection() {
 
   const runSslCheckMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/cron/ssl-check", {
+      const res = await fetch("/api/settings/ssl-check", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? "local-dev-secret"}`,
-        },
       });
-      if (!res.ok) throw new Error("SSL check failed");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof error.error === "string" ? error.error : "SSL check failed"
+        );
+      }
       return res.json();
     },
     onSuccess: (data) => {
