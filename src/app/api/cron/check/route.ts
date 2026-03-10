@@ -329,6 +329,21 @@ export async function POST(request: NextRequest) {
 
       await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
+      // If the outage exceeded the alert delay but the DOWN alert was never sent
+      // (e.g. alert delay was increased, server restarted, or timing edge case),
+      // send a makeup DOWN notification so recipients always see DOWN before UP.
+      const downtimeMs = resolvedAt.getTime() - openIncident.startedAt.getTime();
+      const needsMakeupDown = openIncident.notifiedAt === null && downtimeMs >= alertDelay * 1000;
+      if (needsMakeupDown) {
+        await sendNotifications({
+          monitorName: monitor.name,
+          monitorUrl: monitor.url,
+          status: "down",
+          message: `${monitor.name} is DOWN: ${openIncident.message ?? "Unknown error"}`,
+          timestamp: openIncident.startedAt.toISOString(),
+        });
+      }
+
       await sendNotifications(
         buildRecoveryNotificationPayload({
           monitorName: monitor.name,
@@ -337,7 +352,7 @@ export async function POST(request: NextRequest) {
           incidentMessage: openIncident.message,
           startedAt: openIncident.startedAt,
           resolvedAt,
-          alertWasSent: openIncident.notifiedAt !== null,
+          alertWasSent: openIncident.notifiedAt !== null || needsMakeupDown,
         })
       );
     }
@@ -388,6 +403,19 @@ export async function POST(request: NextRequest) {
       `${incident.monitor.name} recovered (orphaned incident resolved)`
     );
 
+    // Same makeup DOWN logic as the stateChanges path above.
+    const orphanDowntimeMs = resolvedAt.getTime() - incident.startedAt.getTime();
+    const orphanNeedsMakeupDown = incident.notifiedAt === null && orphanDowntimeMs >= alertDelay * 1000;
+    if (orphanNeedsMakeupDown) {
+      await sendNotifications({
+        monitorName: incident.monitor.name,
+        monitorUrl: incident.monitor.url,
+        status: "down",
+        message: `${incident.monitor.name} is DOWN: ${incident.message ?? "Unknown error"}`,
+        timestamp: incident.startedAt.toISOString(),
+      });
+    }
+
     await sendNotifications(
       buildRecoveryNotificationPayload({
         monitorName: incident.monitor.name,
@@ -396,7 +424,7 @@ export async function POST(request: NextRequest) {
         incidentMessage: incident.message,
         startedAt: incident.startedAt,
         resolvedAt,
-        alertWasSent: incident.notifiedAt !== null,
+        alertWasSent: incident.notifiedAt !== null || orphanNeedsMakeupDown,
       })
     );
   }
