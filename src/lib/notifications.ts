@@ -27,6 +27,16 @@ export interface NotificationPayload {
   timestamp: string;
 }
 
+interface RecoveryNotificationOptions {
+  monitorName: string;
+  monitorUrl: string;
+  responseTimeMs: number;
+  incidentMessage: string | null;
+  startedAt: Date;
+  resolvedAt: Date;
+  alertWasSent: boolean;
+}
+
 export async function sendWebhook(
   config: WebhookConfig,
   payload: NotificationPayload
@@ -84,6 +94,26 @@ export async function sendPushover(
   } catch {
     return false;
   }
+}
+
+export function buildRecoveryNotificationPayload(
+  options: RecoveryNotificationOptions
+): NotificationPayload {
+  const downtimeSeconds = Math.round(
+    (options.resolvedAt.getTime() - options.startedAt.getTime()) / 1000
+  );
+  const incidentMessage = options.incidentMessage ?? "Unknown error";
+  const message = options.alertWasSent
+    ? `${options.monitorName} is back UP (${options.responseTimeMs}ms)`
+    : `${options.monitorName} is back UP after ${downtimeSeconds}s (${options.responseTimeMs}ms). Previous error: ${incidentMessage}`;
+
+  return {
+    monitorName: options.monitorName,
+    monitorUrl: options.monitorUrl,
+    status: "up",
+    message,
+    timestamp: options.resolvedAt.toISOString(),
+  };
 }
 
 function toEST(isoTimestamp: string): string {

@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
-import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
+import {
+  buildRecoveryNotificationPayload,
+  dispatchNotification,
+  writeDebugLog,
+  type NotificationPayload,
+} from "@/lib/notifications";
 import { createZendeskTicket, updateZendeskTicket } from "@/lib/zendesk";
 
 export const maxDuration = 120;
@@ -289,7 +294,9 @@ export async function POST(request: NextRequest) {
   }
 
   // Handle recoveries — only one run may resolve and send UP (atomic update).
-  // Send belated DOWN + UP if the delay hadn't fired yet so short outages aren't swallowed.
+  // If a monitor recovers before the delayed DOWN alert fires, send a single
+  // recovery notification with downtime details instead of two back-to-back
+  // webhook posts that can arrive out of order.
   for (const { monitor, result } of stateChanges) {
     if (result.isUp) {
       const openIncident = await prisma.incident.findFirst({
@@ -322,26 +329,17 @@ export async function POST(request: NextRequest) {
 
       await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
-      if (!openIncident.notifiedAt) {
-        await sendNotifications({
+      await sendNotifications(
+        buildRecoveryNotificationPayload({
           monitorName: monitor.name,
           monitorUrl: monitor.url,
-          status: "down",
-          message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
-          timestamp: openIncident.startedAt.toISOString(),
-        });
-        // Small delay to ensure DOWN notification arrives before UP notification
-        // when both are sent in the same batch (prevents out-of-order alerts)
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-
-      await sendNotifications({
-        monitorName: monitor.name,
-        monitorUrl: monitor.url,
-        status: "up",
-        message: `${monitor.name} is back UP (${result.responseTime}ms)`,
-        timestamp: new Date().toISOString(),
-      });
+          responseTimeMs: result.responseTime,
+          incidentMessage: openIncident.message,
+          startedAt: openIncident.startedAt,
+          resolvedAt,
+          alertWasSent: openIncident.notifiedAt !== null,
+        })
+      );
     }
   }
 
@@ -390,27 +388,17 @@ export async function POST(request: NextRequest) {
       `${incident.monitor.name} recovered (orphaned incident resolved)`
     );
 
-    if (!incident.notifiedAt) {
-      const duration = Math.round(
-        (resolvedAt.getTime() - incident.startedAt.getTime()) / 1000
-      );
-      await sendNotifications({
+    await sendNotifications(
+      buildRecoveryNotificationPayload({
         monitorName: incident.monitor.name,
         monitorUrl: incident.monitor.url,
-        status: "down",
-        message: `${incident.monitor.name} was DOWN: ${incident.message} (recovered after ${duration}s)`,
-        timestamp: incident.startedAt.toISOString(),
-      });
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    await sendNotifications({
-      monitorName: incident.monitor.name,
-      monitorUrl: incident.monitor.url,
-      status: "up",
-      message: `${incident.monitor.name} is back UP (${latestCheck.responseTime}ms)`,
-      timestamp: resolvedAt.toISOString(),
-    });
+        responseTimeMs: latestCheck.responseTime,
+        incidentMessage: incident.message,
+        startedAt: incident.startedAt,
+        resolvedAt,
+        alertWasSent: incident.notifiedAt !== null,
+      })
+    );
   }
 
   // Create Zendesk tickets for long-running incidents that don't have one yet.

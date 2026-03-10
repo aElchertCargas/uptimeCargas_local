@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
-import { dispatchNotification, writeDebugLog, type NotificationPayload } from "@/lib/notifications";
+import {
+  buildRecoveryNotificationPayload,
+  dispatchNotification,
+  writeDebugLog,
+  type NotificationPayload,
+} from "@/lib/notifications";
 
 export const maxDuration = 120;
 
@@ -150,25 +155,17 @@ export async function POST(request: NextRequest) {
 
       await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
 
-      if (!openIncident.notifiedAt) {
-        await sendNotifications({
+      await sendNotifications(
+        buildRecoveryNotificationPayload({
           monitorName: monitor.name,
           monitorUrl: monitor.url,
-          status: "down",
-          message: `${monitor.name} was DOWN: ${openIncident.message} (recovered after ${Math.round((resolvedAt.getTime() - openIncident.startedAt.getTime()) / 1000)}s)`,
-          timestamp: openIncident.startedAt.toISOString(),
-        });
-        // Small delay to ensure DOWN notification arrives before UP notification
-        // when both are sent in the same batch (prevents out-of-order alerts)
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-      await sendNotifications({
-        monitorName: monitor.name,
-        monitorUrl: monitor.url,
-        status: "up",
-        message: `${monitor.name} is back UP (${result.responseTime}ms)`,
-        timestamp: new Date().toISOString(),
-      });
+          responseTimeMs: result.responseTime,
+          incidentMessage: openIncident.message,
+          startedAt: openIncident.startedAt,
+          resolvedAt,
+          alertWasSent: openIncident.notifiedAt !== null,
+        })
+      );
     }
   }
 
