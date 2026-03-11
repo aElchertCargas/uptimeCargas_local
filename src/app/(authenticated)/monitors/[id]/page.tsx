@@ -220,7 +220,7 @@ function PaginatedChecksTable({
         params.set("to", applyTime(dateRange!.from!, toTime).toISOString());
       }
     } else {
-      params.set("hours", "24");
+      params.set("hours", "6");
     }
     return `/api/monitors/${monitorId}/checks?${params}`;
   }, [monitorId, page, statusFilter, chartFilter, dateRange, fromTime, toTime, hasChartFilter, hasCalendarFilter]);
@@ -272,7 +272,7 @@ function PaginatedChecksTable({
       ? `${formatDateShort(dateRange!.from!)} ${fromTime} – ${formatDateShort(dateRange!.to)} ${toTime}`
       : `${formatDateShort(dateRange!.from!)} ${fromTime} – ${toTime}`;
   } else {
-    filterLabel = "Last 24 hours";
+    filterLabel = "Last 6 hours";
   }
 
   return (
@@ -340,7 +340,7 @@ function PaginatedChecksTable({
                 </div>
                 <div className="flex items-center justify-between border-t px-3 py-2">
                   <Button variant="ghost" size="sm" className="text-xs" onClick={clearAll}>
-                    Reset to last 24h
+                    Reset to last 6h
                   </Button>
                   <Button size="sm" className="text-xs" onClick={() => setCalendarOpen(false)}>
                     Done
@@ -555,7 +555,7 @@ export default function MonitorDetailPage() {
   const { data: chartChecksData } = useQuery<ChecksResponse>({
     queryKey: ["monitor-checks-chart", id],
     queryFn: async () => {
-      const res = await fetch(`/api/monitors/${id}/checks?hours=24&limit=500`);
+      const res = await fetch(`/api/monitors/${id}/checks?hours=6&limit=500`);
       if (!res.ok) throw new Error("Failed to fetch checks");
       return res.json();
     },
@@ -680,7 +680,7 @@ export default function MonitorDetailPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="font-mono">Response Time</CardTitle>
-              <CardDescription>Last 24 hours — drag to select a time range</CardDescription>
+              <CardDescription>Last 6 hours — drag to select a time range</CardDescription>
             </div>
             {chartFilter.from && (
               <Button variant="outline" size="sm" className="gap-1.5 font-mono text-xs" onClick={clearChartFilter}>
