@@ -113,11 +113,11 @@ function getStatusBadge(monitor: Monitor) {
   return <Badge className="bg-[var(--color-status-down)] text-white">DOWN</Badge>;
 }
 
-function generateUptimeData(checks: Check[]): { date: string; uptime: number | null }[] {
+function generateUptimeData(checks: Check[], days: number): { date: string; uptime: number | null }[] {
   const now = new Date();
   const data: { date: string; uptime: number | null }[] = [];
 
-  for (let i = 89; i >= 0; i--) {
+  for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().slice(0, 10);
@@ -176,6 +176,13 @@ const CHART_HOUR_OPTIONS = [
   { value: 12, label: "12h" },
   { value: 24, label: "24h" },
   { value: 72, label: "3d" },
+] as const;
+
+const UPTIME_DAY_OPTIONS = [
+  { value: 7, label: "7 days" },
+  { value: 14, label: "14 days" },
+  { value: 30, label: "30 days" },
+  { value: 90, label: "90 days" },
 ] as const;
 
 // ─── Checks Table with Pagination ────────────────────────────────────────────
@@ -561,12 +568,24 @@ export default function MonitorDetailPage() {
 
   const [chartFilter, setChartFilter] = useState<TimeFilter>({ from: null, to: null });
   const [chartHours, setChartHours] = useState(6);
+  const [uptimeDays, setUptimeDays] = useState(7);
 
   const { data: monitor, isLoading } = useQuery<Monitor>({
     queryKey: ["monitor", id],
     queryFn: async () => {
       const res = await fetch(`/api/monitors/${id}`);
       if (!res.ok) throw new Error("Failed to fetch monitor");
+      return res.json();
+    },
+    enabled: !!id,
+  });
+
+  const { data: uptimeChecksData } = useQuery<ChecksResponse>({
+    queryKey: ["monitor-checks-uptime", id, uptimeDays],
+    queryFn: async () => {
+      const hours = uptimeDays * 24;
+      const res = await fetch(`/api/monitors/${id}/checks?hours=${hours}&limit=500`);
+      if (!res.ok) throw new Error("Failed to fetch checks");
       return res.json();
     },
     enabled: !!id,
@@ -650,8 +669,9 @@ export default function MonitorDetailPage() {
     );
   }
 
+  const uptimeChecks = uptimeChecksData?.checks ?? [];
   const chartChecks = chartChecksData?.checks ?? [];
-  const uptimeData = generateUptimeData(chartChecks);
+  const uptimeData = generateUptimeData(uptimeChecks, uptimeDays);
   const chartData = chartChecks
     .map((c) => ({ checkedAt: c.checkedAt, responseTime: c.responseTime, isUp: c.isUp }))
     .reverse();
@@ -683,8 +703,26 @@ export default function MonitorDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="font-mono">90-Day Uptime</CardTitle>
-          <CardDescription>Daily uptime percentage</CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div>
+                <CardTitle className="font-mono">{uptimeDays}-Day Uptime</CardTitle>
+                <CardDescription>Daily uptime percentage</CardDescription>
+              </div>
+              <Select value={String(uptimeDays)} onValueChange={(v) => setUptimeDays(Number(v))}>
+                <SelectTrigger size="sm" className="w-[6.5rem] font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UPTIME_DAY_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={String(opt.value)}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <UptimeBar data={uptimeData} />
