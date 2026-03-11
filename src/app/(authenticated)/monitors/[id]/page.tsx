@@ -46,6 +46,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { UptimeBar } from "@/components/dashboard/uptime-bar";
 import { ResponseChart } from "@/components/dashboard/response-chart";
@@ -162,6 +169,15 @@ function formatTimeShort(iso: string): string {
   });
 }
 
+const CHART_HOUR_OPTIONS = [
+  { value: 1, label: "1h" },
+  { value: 3, label: "3h" },
+  { value: 6, label: "6h" },
+  { value: 12, label: "12h" },
+  { value: 24, label: "24h" },
+  { value: 72, label: "3d" },
+] as const;
+
 // ─── Checks Table with Pagination ────────────────────────────────────────────
 
 function applyTime(date: Date, time: string): Date {
@@ -175,10 +191,12 @@ function PaginatedChecksTable({
   monitorId,
   chartFilter,
   onClearChartFilter,
+  defaultHours,
 }: {
   monitorId: string;
   chartFilter: TimeFilter;
   onClearChartFilter: () => void;
+  defaultHours: number;
 }) {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -220,13 +238,13 @@ function PaginatedChecksTable({
         params.set("to", applyTime(dateRange!.from!, toTime).toISOString());
       }
     } else {
-      params.set("hours", "6");
+      params.set("hours", String(defaultHours));
     }
     return `/api/monitors/${monitorId}/checks?${params}`;
-  }, [monitorId, page, statusFilter, chartFilter, dateRange, fromTime, toTime, hasChartFilter, hasCalendarFilter]);
+  }, [monitorId, page, statusFilter, chartFilter, dateRange, fromTime, toTime, hasChartFilter, hasCalendarFilter, defaultHours]);
 
   const { data, isLoading, isFetching } = useQuery<ChecksResponse>({
-    queryKey: ["monitor-checks", monitorId, page, statusFilter, chartFilter.from, chartFilter.to, dateRange?.from?.toISOString(), dateRange?.to?.toISOString(), fromTime, toTime],
+    queryKey: ["monitor-checks", monitorId, page, statusFilter, chartFilter.from, chartFilter.to, dateRange?.from?.toISOString(), dateRange?.to?.toISOString(), fromTime, toTime, defaultHours],
     queryFn: async () => {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error("Failed to fetch checks");
@@ -272,7 +290,8 @@ function PaginatedChecksTable({
       ? `${formatDateShort(dateRange!.from!)} ${fromTime} – ${formatDateShort(dateRange!.to)} ${toTime}`
       : `${formatDateShort(dateRange!.from!)} ${fromTime} – ${toTime}`;
   } else {
-    filterLabel = "Last 6 hours";
+    const opt = CHART_HOUR_OPTIONS.find((o) => o.value === defaultHours);
+    filterLabel = opt ? `Last ${opt.label}` : `Last ${defaultHours}h`;
   }
 
   return (
@@ -340,7 +359,7 @@ function PaginatedChecksTable({
                 </div>
                 <div className="flex items-center justify-between border-t px-3 py-2">
                   <Button variant="ghost" size="sm" className="text-xs" onClick={clearAll}>
-                    Reset to last 6h
+                    Reset to last {CHART_HOUR_OPTIONS.find((o) => o.value === defaultHours)?.label ?? `${defaultHours}h`}
                   </Button>
                   <Button size="sm" className="text-xs" onClick={() => setCalendarOpen(false)}>
                     Done
@@ -541,6 +560,7 @@ export default function MonitorDetailPage() {
   const id = params.id;
 
   const [chartFilter, setChartFilter] = useState<TimeFilter>({ from: null, to: null });
+  const [chartHours, setChartHours] = useState(6);
 
   const { data: monitor, isLoading } = useQuery<Monitor>({
     queryKey: ["monitor", id],
@@ -553,9 +573,9 @@ export default function MonitorDetailPage() {
   });
 
   const { data: chartChecksData } = useQuery<ChecksResponse>({
-    queryKey: ["monitor-checks-chart", id],
+    queryKey: ["monitor-checks-chart", id, chartHours],
     queryFn: async () => {
-      const res = await fetch(`/api/monitors/${id}/checks?hours=6&limit=500`);
+      const res = await fetch(`/api/monitors/${id}/checks?hours=${chartHours}&limit=500`);
       if (!res.ok) throw new Error("Failed to fetch checks");
       return res.json();
     },
@@ -677,13 +697,30 @@ export default function MonitorDetailPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="font-mono">Response Time</CardTitle>
-              <CardDescription>Last 6 hours — drag to select a time range</CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div>
+                <CardTitle className="font-mono">Response Time</CardTitle>
+                <CardDescription>
+                  Last {CHART_HOUR_OPTIONS.find((o) => o.value === chartHours)?.label ?? `${chartHours}h`} — drag to
+                  select a time range
+                </CardDescription>
+              </div>
+              <Select value={String(chartHours)} onValueChange={(v) => setChartHours(Number(v))}>
+                <SelectTrigger size="sm" className="w-[5rem] font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHART_HOUR_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={String(opt.value)}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {chartFilter.from && (
-              <Button variant="outline" size="sm" className="gap-1.5 font-mono text-xs" onClick={clearChartFilter}>
+              <Button variant="outline" size="sm" className="gap-1.5 font-mono text-xs w-fit" onClick={clearChartFilter}>
                 <X className="size-3" />
                 Clear selection
               </Button>
@@ -699,6 +736,7 @@ export default function MonitorDetailPage() {
         monitorId={id}
         chartFilter={chartFilter}
         onClearChartFilter={clearChartFilter}
+        defaultHours={chartHours}
       />
 
       <div className="flex gap-2">
