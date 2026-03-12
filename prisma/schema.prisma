@@ -57,6 +57,7 @@ model NotificationChannel {
   enabled   Boolean  @default(true)
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
+  alertDeliveries AlertDelivery[]
 }
 
 model Incident {
@@ -68,8 +69,46 @@ model Incident {
   notifiedAt      DateTime?
   message         String?
   zendeskTicketId String?
+  alertEvents     AlertEvent[]
 
   @@index([monitorId, startedAt])
+}
+
+model AlertEvent {
+  id           String          @id @default(cuid())
+  incidentId   String
+  incident     Incident        @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  kind         String
+  status       String          @default("pending")
+  scheduledFor DateTime
+  sentAt       DateTime?
+  context      Json?
+  lastError    String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deliveries   AlertDelivery[]
+
+  @@unique([incidentId, kind])
+  @@index([status, scheduledFor])
+  @@index([incidentId, createdAt])
+}
+
+model AlertDelivery {
+  id           String              @id @default(cuid())
+  alertEventId String
+  channelId    String
+  alertEvent   AlertEvent          @relation(fields: [alertEventId], references: [id], onDelete: Cascade)
+  channel      NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  status       String              @default("pending")
+  attemptCount Int                 @default(0)
+  attemptedAt  DateTime?
+  sentAt       DateTime?
+  lastError    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([alertEventId, channelId])
+  @@index([channelId, status])
 }
 
 model ExcludedPattern {

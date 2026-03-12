@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { performCheck, runChecksInBatches, type CheckResult } from "@/lib/checker";
 import {
-  buildRecoveryNotificationPayload,
-  dispatchNotification,
-  writeDebugLog,
-  type NotificationPayload,
-} from "@/lib/notifications";
+  dispatchPendingAlertEvents,
+  getZendeskSettings,
+  queueDueDownAlertEvents,
+  recordDownTransitions,
+  resolveRecoveryTransitions,
+  type MonitorStateTransition,
+} from "@/lib/alerting";
+import { prisma } from "@/lib/prisma";
+import { performCheck, runChecksInBatches } from "@/lib/checker";
 
 export const maxDuration = 120;
 
@@ -18,20 +20,10 @@ interface CheckRecord {
   message: string | null;
 }
 
-async function sendNotifications(payload: NotificationPayload) {
-  const channels = await prisma.notificationChannel.findMany({
-    where: { enabled: true },
-  });
-  await Promise.allSettled(
-    channels.map((ch) =>
-      dispatchNotification(ch.type, ch.name, ch.config as Record<string, unknown>, payload)
-    )
-  );
-}
-
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const monitorIds: string[] = body.monitorIds;
+  const sendAlerts = body.sendAlerts === true;
 
   if (!Array.isArray(monitorIds) || monitorIds.length === 0) {
     return NextResponse.json(
@@ -51,7 +43,7 @@ export async function POST(request: NextRequest) {
   });
 
   const pendingInserts: CheckRecord[] = [];
-  const stateChanges: { monitor: (typeof monitors)[number]; result: CheckResult }[] = [];
+  const stateChanges: MonitorStateTransition<(typeof monitors)[number]>[] = [];
 
   await runChecksInBatches(monitors, async (monitor) => {
     const result = await performCheck(
@@ -72,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     const previouslyUp = monitor.checks[0]?.isUp ?? true;
     if (previouslyUp !== result.isUp) {
-      stateChanges.push({ monitor, result });
+      stateChanges.push({ monitor, result, previouslyUp });
     }
   });
 
@@ -122,55 +114,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Handle state changes so manual "Check now" also creates/resolves incidents and sends notifications
-  for (const { monitor, result } of stateChanges) {
-    if (!result.isUp) {
-      const existingOpen = await prisma.incident.findFirst({
-        where: { monitorId: monitor.id, resolvedAt: null },
-      });
-      if (!existingOpen) {
-        await prisma.incident.create({
-          data: { monitorId: monitor.id, message: result.message },
-        });
-        await writeDebugLog("down", monitor.name, null, result.message ?? "Monitor went down");
-      }
-    }
+  const zendeskSettings = await getZendeskSettings();
+
+  await recordDownTransitions(stateChanges);
+
+  if (sendAlerts) {
+    await queueDueDownAlertEvents(new Date());
   }
+  await resolveRecoveryTransitions(stateChanges, zendeskSettings, sendAlerts);
 
-  for (const { monitor, result } of stateChanges) {
-    if (result.isUp) {
-      const openIncident = await prisma.incident.findFirst({
-        where: { monitorId: monitor.id, resolvedAt: null },
-        orderBy: { startedAt: "desc" },
-      });
-      if (!openIncident) continue;
-
-      const resolvedAt = new Date();
-      const notifiedAt = openIncident.notifiedAt ?? resolvedAt;
-      const updateResult = await prisma.incident.updateMany({
-        where: { id: openIncident.id, resolvedAt: null },
-        data: { resolvedAt, notifiedAt },
-      });
-      if (updateResult.count === 0) continue;
-
-      await writeDebugLog("up", monitor.name, null, `${monitor.name} recovered (${result.responseTime}ms)`);
-
-      await sendNotifications(
-        buildRecoveryNotificationPayload({
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          responseTimeMs: result.responseTime,
-          incidentMessage: openIncident.message,
-          startedAt: openIncident.startedAt,
-          resolvedAt,
-          alertWasSent: openIncident.notifiedAt !== null,
-        })
-      );
-    }
+  let alertsProcessed = 0;
+  let alertsSent = 0;
+  if (sendAlerts) {
+    const dispatchSummary = await dispatchPendingAlertEvents(new Date());
+    alertsProcessed = dispatchSummary.processed;
+    alertsSent = dispatchSummary.sent;
   }
 
   return NextResponse.json({
     checked: pendingInserts.length,
+    sendAlerts,
+    alertsProcessed,
+    alertsSent,
     results: pendingInserts.map((r) => ({
       monitorId: r.monitorId,
       isUp: r.isUp,

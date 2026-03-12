@@ -34,13 +34,17 @@ interface RecoveryNotificationOptions {
   incidentMessage: string | null;
   startedAt: Date;
   resolvedAt: Date;
-  alertWasSent: boolean;
+}
+
+export interface NotificationDispatchResult {
+  ok: boolean;
+  error: string | null;
 }
 
 export async function sendWebhook(
   config: WebhookConfig,
   payload: NotificationPayload
-): Promise<boolean> {
+): Promise<NotificationDispatchResult> {
   try {
     const response = await fetch(config.url, {
       method: "POST",
@@ -59,16 +63,26 @@ export async function sendWebhook(
         timestamp: payload.timestamp,
       }),
     });
-    return response.ok;
-  } catch {
-    return false;
+    if (response.ok) {
+      return { ok: true, error: null };
+    }
+
+    return {
+      ok: false,
+      error: `HTTP ${response.status} ${response.statusText}`.trim(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown webhook error",
+    };
   }
 }
 
 export async function sendPushover(
   config: PushoverConfig,
   payload: NotificationPayload
-): Promise<boolean> {
+): Promise<NotificationDispatchResult> {
   const icon = payload.status === "down" ? "🔴" : payload.status === "ssl_expiring" ? "🟡" : "🟢";
   const title = payload.status === "ssl_expiring"
     ? `${icon} ${payload.monitorName} SSL Certificate Expiring`
@@ -90,9 +104,19 @@ export async function sendPushover(
         ...(config.device && { device: config.device }),
       }),
     });
-    return response.ok;
-  } catch {
-    return false;
+    if (response.ok) {
+      return { ok: true, error: null };
+    }
+
+    return {
+      ok: false,
+      error: `HTTP ${response.status} ${response.statusText}`.trim(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown Pushover error",
+    };
   }
 }
 
@@ -103,9 +127,7 @@ export function buildRecoveryNotificationPayload(
     (options.resolvedAt.getTime() - options.startedAt.getTime()) / 1000
   );
   const incidentMessage = options.incidentMessage ?? "Unknown error";
-  const message = options.alertWasSent
-    ? `${options.monitorName} is back UP (${options.responseTimeMs}ms)`
-    : `${options.monitorName} is back UP after ${downtimeSeconds}s (${options.responseTimeMs}ms). Previous error: ${incidentMessage}`;
+  const message = `${options.monitorName} is back UP after ${downtimeSeconds}s (${options.responseTimeMs}ms). Previous error: ${incidentMessage}`;
 
   return {
     monitorName: options.monitorName,
@@ -188,7 +210,7 @@ function buildAdaptiveCard(payload: NotificationPayload) {
 export async function sendTeams(
   config: TeamsConfig,
   payload: NotificationPayload
-): Promise<boolean> {
+): Promise<NotificationDispatchResult> {
   try {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -207,10 +229,57 @@ export async function sendTeams(
       headers,
       body,
     });
-    return response.ok;
-  } catch {
-    return false;
+    if (response.ok) {
+      return { ok: true, error: null };
+    }
+
+    return {
+      ok: false,
+      error: `HTTP ${response.status} ${response.statusText}`.trim(),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown Teams error",
+    };
   }
+}
+
+export async function dispatchNotificationDetailed(
+  channelType: string,
+  channelName: string,
+  config: Record<string, unknown>,
+  payload: NotificationPayload
+): Promise<NotificationDispatchResult> {
+  let result: NotificationDispatchResult;
+  switch (channelType) {
+    case "webhook":
+      result = await sendWebhook(config as unknown as WebhookConfig, payload);
+      break;
+    case "pushover":
+      result = await sendPushover(config as unknown as PushoverConfig, payload);
+      break;
+    case "teams":
+      result = await sendTeams(config as unknown as TeamsConfig, payload);
+      break;
+    default:
+      result = {
+        ok: false,
+        error: `Unsupported notification channel type: ${channelType}`,
+      };
+      break;
+  }
+
+  await writeDebugLog(
+    result.ok ? "webhook_sent" : "webhook_failed",
+    payload.monitorName,
+    channelName,
+    result.ok
+      ? `${channelType} notification sent (${payload.status})`
+      : `${channelType} notification failed (${payload.status})${result.error ? `: ${result.error}` : ""}`
+  ).catch(() => {});
+
+  return result;
 }
 
 export async function dispatchNotification(
@@ -219,29 +288,14 @@ export async function dispatchNotification(
   config: Record<string, unknown>,
   payload: NotificationPayload
 ): Promise<boolean> {
-  let ok = false;
-  switch (channelType) {
-    case "webhook":
-      ok = await sendWebhook(config as unknown as WebhookConfig, payload);
-      break;
-    case "pushover":
-      ok = await sendPushover(config as unknown as PushoverConfig, payload);
-      break;
-    case "teams":
-      ok = await sendTeams(config as unknown as TeamsConfig, payload);
-      break;
-  }
-
-  await writeDebugLog(
-    ok ? "webhook_sent" : "webhook_failed",
-    payload.monitorName,
+  const result = await dispatchNotificationDetailed(
+    channelType,
     channelName,
-    ok
-      ? `${channelType} notification sent (${payload.status})`
-      : `${channelType} notification failed (${payload.status})`
-  ).catch(() => {});
+    config,
+    payload
+  );
 
-  return ok;
+  return result.ok;
 }
 
 export async function writeDebugLog(
