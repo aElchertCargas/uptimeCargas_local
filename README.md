@@ -1,6 +1,6 @@
 # Uptime Cargas
 
-Internal uptime monitoring dashboard with authentication. Tracks HTTP endpoints, sends notifications via webhook and Pushover when monitors go down/up. Syncs with the Energy Customers API to auto-manage monitors.
+1Internal uptime monitoring dashboard with authentication. Tracks HTTP endpoints, sends notifications via webhook and Pushover when monitors go down/up. Syncs with the Energy Customers API to auto-manage monitors.
 
 ## Features
 
