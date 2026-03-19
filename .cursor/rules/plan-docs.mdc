@@ -1,0 +1,11 @@
+---
+description: Keep plan and analysis markdown docs under plan/
+alwaysApply: true
+---
+
+# Plan Documents
+
+- Store planning, analysis, design, and implementation-summary markdown files in `plan/`.
+- Do not create new root-level markdown plan docs.
+- Keep user-facing project docs like `README.md` and setup guides at the repo root unless explicitly requested otherwise.
+- When adding or moving plan docs, prefer relative links that continue to work from within `plan/`.

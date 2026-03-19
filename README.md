@@ -104,14 +104,13 @@ Make sure the deployed runtime includes the `openssl` CLI on `PATH`, since `/api
 npm run hash-password your-secure-password
 ```
 
-**Automated checks:** The always-on `uptimeCargas` web service runs `/api/cron/check` internally every 60 seconds.
+**Automated checks:** The always-on `uptimeCargas` web service runs all recurring jobs internally:
 
-Use Railway-triggered schedules only for the daily jobs:
+- `/api/cron/check` every 60 seconds
+- SSL certificate checks every 24 hours
+- cleanup every 24 hours
 
-- `/api/cron/ssl-check` every 24 hours
-- `/api/cron/cleanup` every 24 hours
-
-**Note:** `CRON_SECRET` is still required because the internal scheduler self-authenticates when it calls `/api/cron/check`, and any Railway-triggered daily jobs should also send `Authorization: Bearer <CRON_SECRET>`.
+**Note:** `CRON_SECRET` is still required because the internal scheduler self-authenticates when it calls `/api/cron/check`. The `/api/cron/ssl-check` and `/api/cron/cleanup` routes remain available for manual or external triggering with `Authorization: Bearer <CRON_SECRET>`, but Railway cron is no longer required for normal operation.
 
 ## API
 

@@ -4,9 +4,9 @@ import { isSchedulerRunning, startScheduler } from "@/lib/scheduler";
 export async function GET() {
   return NextResponse.json({
     running: isSchedulerRunning(),
-    mode: "internal-checks-only",
+    mode: "internal-all-jobs",
     message:
-      "The in-process scheduler owns /api/cron/check. Railway should keep handling /api/cron/ssl-check and /api/cron/cleanup.",
+      "The in-process scheduler owns /api/cron/check, /api/cron/ssl-check, and /api/cron/cleanup inside the always-on web instance.",
   });
 }
 
@@ -15,8 +15,8 @@ export async function POST() {
 
   return NextResponse.json({
     running: true,
-    mode: "internal-checks-only",
+    mode: "internal-all-jobs",
     message:
-      "The in-process scheduler owns /api/cron/check. Railway should keep handling /api/cron/ssl-check and /api/cron/cleanup.",
+      "The in-process scheduler owns /api/cron/check, /api/cron/ssl-check, and /api/cron/cleanup inside the always-on web instance.",
   });
 }
