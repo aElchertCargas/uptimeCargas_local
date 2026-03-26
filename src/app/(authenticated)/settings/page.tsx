@@ -167,6 +167,7 @@ const DEFAULT_TEAMS_BODY = `{
       "version": "1.4",
       "body": [
         { "type": "TextBlock", "weight": "bolder", "text": "{{monitorName}} is {{status}}" },
+        { "type": "FactSet", "facts": [{ "title": "URL", "value": "[{{monitorUrl}}]({{monitorUrl}})" }] },
         { "type": "TextBlock", "text": "{{message}}", "wrap": true }
       ]
     }

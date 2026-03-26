@@ -189,7 +189,10 @@ function buildAdaptiveCard(payload: NotificationPayload) {
               type: "FactSet",
               facts: [
                 { title: "Monitor", value: payload.monitorName },
-                { title: "URL", value: payload.monitorUrl },
+                {
+                  title: "URL",
+                  value: `[${payload.monitorUrl}](${payload.monitorUrl})`,
+                },
                 { title: "Status", value: payload.status.toUpperCase() },
                 { title: "Time", value: estTime },
               ],
