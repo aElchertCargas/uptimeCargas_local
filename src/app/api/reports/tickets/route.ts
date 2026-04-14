@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getIncidentZendeskStatus } from "@/lib/incident-zendesk-status";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
@@ -52,19 +53,31 @@ export async function GET() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    const recentIncidents = allIncidents.slice(0, 10).map((incident) => ({
-      id: incident.id,
-      monitorName: incident.monitor.name,
-      startedAt: incident.startedAt.toISOString(),
-      resolvedAt: incident.resolvedAt?.toISOString() || null,
-      duration: incident.resolvedAt
-        ? (new Date(incident.resolvedAt).getTime() -
-            new Date(incident.startedAt).getTime()) /
-          1000 /
-          60
-        : null,
-      message: incident.message,
-    }));
+    const recentIncidents = allIncidents.slice(0, 10).map((incident) => {
+      const zendeskStatus = getIncidentZendeskStatus({
+        resolvedAt: incident.resolvedAt,
+        zendeskTicketId: incident.zendeskTicketId,
+        zendeskRecoveryStatus: incident.zendeskRecoveryStatus,
+      });
+
+      return {
+        id: incident.id,
+        monitorName: incident.monitor.name,
+        startedAt: incident.startedAt.toISOString(),
+        resolvedAt: incident.resolvedAt?.toISOString() || null,
+        duration: incident.resolvedAt
+          ? (new Date(incident.resolvedAt).getTime() -
+              new Date(incident.startedAt).getTime()) /
+            1000 /
+            60
+          : null,
+        message: incident.message,
+        zendeskTicketId: incident.zendeskTicketId,
+        zendeskStatus: zendeskStatus.label,
+        zendeskStatusKey: zendeskStatus.key,
+        zendeskStatusDescription: zendeskStatus.description,
+      };
+    });
 
     return NextResponse.json({
       total: allIncidents.length,

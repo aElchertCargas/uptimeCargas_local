@@ -69,6 +69,7 @@ model Incident {
   notifiedAt      DateTime?
   message         String?
   zendeskTicketId String?
+  zendeskRecoveryStatus String?
   alertEvents     AlertEvent[]
 
   @@index([monitorId, startedAt])

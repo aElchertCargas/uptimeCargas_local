@@ -43,11 +43,27 @@ const TYPE_META: Record<string, { icon: typeof ArrowDown; color: string; label: 
   up:             { icon: ArrowUp,        color: "text-[var(--color-status-up)]",   label: "UP",      badgeClass: "bg-[var(--color-status-up)] text-white" },
   webhook_sent:   { icon: Send,           color: "text-blue-400",                   label: "SENT",    badgeClass: "bg-blue-500 text-white" },
   webhook_failed: { icon: AlertTriangle,  color: "text-amber-400",                 label: "FAIL",    badgeClass: "bg-amber-500 text-white" },
+  zendesk_ticket: { icon: Send,           color: "text-violet-400",                label: "ZENDESK", badgeClass: "bg-violet-500 text-white" },
+  zendesk_ticket_failed: {
+    icon: AlertTriangle,
+    color: "text-violet-400",
+    label: "ZENDESK FAIL",
+    badgeClass: "bg-violet-700 text-white",
+  },
   ssl_expiring:   { icon: ShieldAlert,    color: "text-amber-400",                 label: "SSL",     badgeClass: "bg-amber-500 text-white" },
   ssl_error:      { icon: ShieldAlert,    color: "text-[var(--color-status-down)]", label: "SSL ERR", badgeClass: "bg-[var(--color-status-down)] text-white" },
 };
 
-type FilterType = "all" | "down" | "up" | "webhook_sent" | "webhook_failed" | "ssl_expiring" | "ssl_error";
+type FilterType =
+  | "all"
+  | "down"
+  | "up"
+  | "webhook_sent"
+  | "webhook_failed"
+  | "zendesk_ticket"
+  | "zendesk_ticket_failed"
+  | "ssl_expiring"
+  | "ssl_error";
 
 function formatDateTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString("en-US", {
@@ -95,6 +111,8 @@ export default function DebugLogPage() {
     up: allLogs.filter((l) => l.type === "up").length,
     webhook_sent: allLogs.filter((l) => l.type === "webhook_sent").length,
     webhook_failed: allLogs.filter((l) => l.type === "webhook_failed").length,
+    zendesk_ticket: allLogs.filter((l) => l.type === "zendesk_ticket").length,
+    zendesk_ticket_failed: allLogs.filter((l) => l.type === "zendesk_ticket_failed").length,
     ssl_expiring: allLogs.filter((l) => l.type === "ssl_expiring").length,
     ssl_error: allLogs.filter((l) => l.type === "ssl_error").length,
   };
@@ -120,7 +138,17 @@ export default function DebugLogPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["all", "down", "up", "webhook_sent", "webhook_failed", "ssl_expiring", "ssl_error"] as FilterType[]).map((f) => {
+        {([
+          "all",
+          "down",
+          "up",
+          "webhook_sent",
+          "webhook_failed",
+          "zendesk_ticket",
+          "zendesk_ticket_failed",
+          "ssl_expiring",
+          "ssl_error",
+        ] as FilterType[]).map((f) => {
           const meta = TYPE_META[f];
           const active = typeFilter === f;
           return (

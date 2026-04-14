@@ -38,6 +38,12 @@ const TYPE_CONFIG: Record<string, { icon: typeof ArrowDown; color: string; label
   up: { icon: ArrowUp, color: "text-[var(--color-status-up)]", label: "UP" },
   webhook_sent: { icon: Send, color: "text-blue-400", label: "SENT" },
   webhook_failed: { icon: AlertTriangle, color: "text-amber-400", label: "FAIL" },
+  zendesk_ticket: { icon: Send, color: "text-violet-400", label: "ZENDESK" },
+  zendesk_ticket_failed: {
+    icon: AlertTriangle,
+    color: "text-violet-400",
+    label: "ZENDESK FAIL",
+  },
   ssl_expiring: { icon: ShieldAlert, color: "text-amber-400", label: "SSL" },
   ssl_error: { icon: ShieldAlert, color: "text-[var(--color-status-down)]", label: "SSL ERR" },
 };

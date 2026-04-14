@@ -1,10 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TicketChart } from "@/components/reports/ticket-chart";
 import { TicketStatsCard } from "@/components/reports/ticket-stats-card";
+import type { IncidentZendeskStatusKey } from "@/lib/incident-zendesk-status";
 
 interface TicketStats {
   total: number;
@@ -26,7 +28,29 @@ interface TicketStats {
     resolvedAt: string | null;
     duration: number | null;
     message: string | null;
+    zendeskTicketId: string | null;
+    zendeskStatus: string;
+    zendeskStatusKey: IncidentZendeskStatusKey;
+    zendeskStatusDescription: string;
   }>;
+}
+
+function getZendeskBadgeClass(key: IncidentZendeskStatusKey): string {
+  switch (key) {
+    case "recovery_posted":
+      return "bg-[var(--color-status-up)] text-white";
+    case "recovery_failed":
+      return "bg-[var(--color-status-down)] text-white";
+    case "ticket_open":
+      return "bg-violet-600 text-white";
+    case "recovery_skipped":
+      return "bg-amber-500 text-white";
+    case "recovery_unknown":
+      return "bg-muted text-foreground";
+    case "no_ticket":
+    default:
+      return "bg-muted text-foreground";
+  }
 }
 
 export default function ReportsPage() {
@@ -122,9 +146,14 @@ export default function ReportsPage() {
                     className="flex items-start justify-between gap-4 rounded-lg border border-border p-3 hover:bg-accent/50 transition-colors"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-sm">
-                        {incident.monitorName}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-medium text-sm">
+                          {incident.monitorName}
+                        </p>
+                        <Badge className={getZendeskBadgeClass(incident.zendeskStatusKey)}>
+                          {incident.zendeskStatus}
+                        </Badge>
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {new Date(incident.startedAt).toLocaleString()}
                       </p>
@@ -133,6 +162,10 @@ export default function ReportsPage() {
                           {incident.message}
                         </p>
                       )}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {incident.zendeskStatusDescription}
+                        {incident.zendeskTicketId ? ` Ticket #${incident.zendeskTicketId}.` : ""}
+                      </p>
                     </div>
                     <div className="text-right">
                       {incident.resolvedAt ? (

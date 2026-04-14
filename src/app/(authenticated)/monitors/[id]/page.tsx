@@ -58,6 +58,7 @@ import { UptimeBar } from "@/components/dashboard/uptime-bar";
 import { ResponseChart } from "@/components/dashboard/response-chart";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getIncidentZendeskStatus, type IncidentZendeskStatusKey } from "@/lib/incident-zendesk-status";
 import { toast } from "sonner";
 import type { DateRange } from "react-day-picker";
 
@@ -81,6 +82,14 @@ interface Monitor {
   active: boolean;
   tags: string[];
   checks: Check[];
+  incidents: Array<{
+    id: string;
+    startedAt: string;
+    resolvedAt: string | null;
+    message: string | null;
+    zendeskTicketId: string | null;
+    zendeskRecoveryStatus: string | null;
+  }>;
   sslExpiresAt: string | null;
   sslIssuer: string | null;
   sslLastCheckedAt: string | null;
@@ -169,6 +178,24 @@ function formatTimeShort(iso: string): string {
   });
 }
 
+function getIncidentZendeskBadgeClass(key: IncidentZendeskStatusKey): string {
+  switch (key) {
+    case "recovery_posted":
+      return "bg-[var(--color-status-up)] text-white";
+    case "recovery_failed":
+      return "bg-[var(--color-status-down)] text-white";
+    case "ticket_open":
+      return "bg-violet-600 text-white";
+    case "recovery_skipped":
+      return "bg-amber-500 text-white";
+    case "recovery_unknown":
+      return "bg-muted text-foreground";
+    case "no_ticket":
+    default:
+      return "bg-muted text-foreground";
+  }
+}
+
 const CHART_HOUR_OPTIONS = [
   { value: 1, label: "1h" },
   { value: 3, label: "3h" },
@@ -221,8 +248,9 @@ function PaginatedChecksTable({
     },
   });
 
+  const [initialNow] = useState(() => Date.now());
   const retentionDays = parseInt(settings?.retentionDays ?? "90", 10);
-  const earliestDate = new Date(Date.now() - retentionDays * 86_400_000);
+  const earliestDate = new Date(initialNow - retentionDays * 86_400_000);
 
   const hasChartFilter = !!(chartFilter.from && chartFilter.to);
   const hasCalendarFilter = !!dateRange?.from;
@@ -492,6 +520,8 @@ function getSslBadge(days: number) {
 }
 
 function SslInfoCard({ monitor }: { monitor: Monitor }) {
+  const [initialNow] = useState(() => Date.now());
+
   if (!monitor.sslExpiresAt) {
     return (
       <Card>
@@ -509,7 +539,7 @@ function SslInfoCard({ monitor }: { monitor: Monitor }) {
   }
 
   const expiresAt = new Date(monitor.sslExpiresAt);
-  const daysRemaining = Math.floor((expiresAt.getTime() - Date.now()) / 86_400_000);
+  const daysRemaining = Math.floor((expiresAt.getTime() - initialNow) / 86_400_000);
   const colorClass = getSslColor(daysRemaining);
 
   return (
@@ -553,6 +583,85 @@ function SslInfoCard({ monitor }: { monitor: Monitor }) {
             Last checked: {formatDateTime(monitor.sslLastCheckedAt)}
           </p>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function IncidentHistoryCard({ incidents }: { incidents: Monitor["incidents"] }) {
+  const recentIncidents = incidents.slice(0, 10);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="font-mono text-base">Recent Incidents</CardTitle>
+        <CardDescription>
+          Zendesk ticket and recovery status for the latest downtime events
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">
+          {recentIncidents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No incidents recorded yet.</p>
+          ) : (
+            recentIncidents.map((incident) => {
+              const zendeskStatus = getIncidentZendeskStatus({
+                resolvedAt: incident.resolvedAt,
+                zendeskTicketId: incident.zendeskTicketId,
+                zendeskRecoveryStatus: incident.zendeskRecoveryStatus,
+              });
+
+              return (
+                <div
+                  key={incident.id}
+                  className="rounded-lg border border-border p-3"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          className={
+                            incident.resolvedAt
+                              ? "bg-[var(--color-status-up)] text-white"
+                              : "bg-[var(--color-status-down)] text-white"
+                          }
+                        >
+                          {incident.resolvedAt ? "Resolved" : "Open"}
+                        </Badge>
+                        <Badge className={getIncidentZendeskBadgeClass(zendeskStatus.key)}>
+                          {zendeskStatus.label}
+                        </Badge>
+                      </div>
+                      <p className="font-mono text-xs text-muted-foreground">
+                        Started: {formatDateTime(incident.startedAt)}
+                      </p>
+                      {incident.resolvedAt && (
+                        <p className="font-mono text-xs text-muted-foreground">
+                          Recovered: {formatDateTime(incident.resolvedAt)}
+                        </p>
+                      )}
+                      {incident.message && (
+                        <p className="text-sm text-muted-foreground">
+                          {incident.message}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-left sm:max-w-xs sm:text-right">
+                      <p className="text-xs text-muted-foreground">
+                        {zendeskStatus.description}
+                      </p>
+                      {incident.zendeskTicketId && (
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">
+                          Ticket #{incident.zendeskTicketId}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -732,6 +841,8 @@ export default function MonitorDetailPage() {
       {monitor.url.startsWith("https://") && (
         <SslInfoCard monitor={monitor} />
       )}
+
+      <IncidentHistoryCard incidents={monitor.incidents} />
 
       <Card>
         <CardHeader>

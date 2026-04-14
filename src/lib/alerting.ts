@@ -96,6 +96,12 @@ interface ResolveRecoveryOptions {
   reason: string;
 }
 
+type ZendeskRecoveryUpdateResult =
+  | "updated"
+  | "failed"
+  | "skipped_no_ticket"
+  | "skipped_no_config";
+
 function parseResponseTimeMs(
   eventContext: Prisma.JsonValue | null | undefined
 ): number {
@@ -183,12 +189,19 @@ async function addZendeskRecoveryUpdate(
   zendeskSettings: ZendeskSettings,
   resolvedAt: Date,
   responseTimeMs: number
-) {
-  if (
-    !incident.zendeskTicketId ||
-    !hasZendeskConfig(zendeskSettings)
-  ) {
-    return;
+) : Promise<ZendeskRecoveryUpdateResult> {
+  if (!hasZendeskConfig(zendeskSettings)) {
+    return "skipped_no_config";
+  }
+
+  if (!incident.zendeskTicketId) {
+    await writeDebugLog(
+      "zendesk_ticket",
+      incident.monitor.name,
+      "zendesk",
+      "Recovery detected, but no Zendesk ticket exists for this incident."
+    ).catch(() => {});
+    return "skipped_no_ticket";
   }
 
   const downtimeMinutes = Math.max(
@@ -224,6 +237,8 @@ async function addZendeskRecoveryUpdate(
       ? `Zendesk ticket #${incident.zendeskTicketId} updated with recovery note — ${ticketUrl}`
       : `Failed to update Zendesk ticket #${incident.zendeskTicketId} with recovery note — ${ticketUrl}`
   ).catch(() => {});
+
+  return updated ? "updated" : "failed";
 }
 
 async function finalizeRecovery(
@@ -241,12 +256,17 @@ async function finalizeRecovery(
     return false;
   }
 
-  await addZendeskRecoveryUpdate(
+  const zendeskRecoveryStatus = await addZendeskRecoveryUpdate(
     incident,
     options.zendeskSettings,
     resolvedAt,
     responseTimeMs
   );
+
+  await prisma.incident.update({
+    where: { id: incident.id },
+    data: { zendeskRecoveryStatus },
+  });
 
   await writeDebugLog("up", incident.monitor.name, null, options.reason);
 
