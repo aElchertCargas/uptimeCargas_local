@@ -1,10 +1,12 @@
-export type ZendeskRecoveryStatus =
+export type KnownZendeskRecoveryStatus =
   | "updated"
   | "failed"
   | "skipped_no_ticket"
   | "skipped_no_config"
   | null
   | undefined;
+
+export type ZendeskRecoveryStatus = string | null | undefined;
 
 export type IncidentZendeskStatusKey =
   | "no_ticket"
