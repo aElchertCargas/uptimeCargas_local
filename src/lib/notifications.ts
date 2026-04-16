@@ -19,12 +19,19 @@ interface TeamsConfig {
   headers?: Record<string, string>;
 }
 
+export interface NotificationZendeskMetadata {
+  url: string | null;
+  display: string;
+  updated: boolean;
+}
+
 export interface NotificationPayload {
   monitorName: string;
   monitorUrl: string;
   status: "down" | "up" | "ssl_expiring";
   message: string;
   timestamp: string;
+  zendesk?: NotificationZendeskMetadata;
 }
 
 interface RecoveryNotificationOptions {
@@ -34,6 +41,7 @@ interface RecoveryNotificationOptions {
   incidentMessage: string | null;
   startedAt: Date;
   resolvedAt: Date;
+  zendesk?: NotificationZendeskMetadata;
 }
 
 export interface NotificationDispatchResult {
@@ -61,6 +69,7 @@ export async function sendWebhook(
         },
         message: payload.message,
         timestamp: payload.timestamp,
+        ...(payload.zendesk ? { zendesk: payload.zendesk } : {}),
       }),
     });
     if (response.ok) {
@@ -135,6 +144,7 @@ export function buildRecoveryNotificationPayload(
     status: "up",
     message,
     timestamp: options.resolvedAt.toISOString(),
+    ...(options.zendesk ? { zendesk: options.zendesk } : {}),
   };
 }
 
@@ -158,13 +168,35 @@ function interpolateTemplate(template: string, payload: NotificationPayload): st
     .replace(/\{\{monitorUrl\}\}/g, payload.monitorUrl)
     .replace(/\{\{status\}\}/g, payload.status)
     .replace(/\{\{message\}\}/g, payload.message)
-    .replace(/\{\{timestamp\}\}/g, toEST(payload.timestamp));
+    .replace(/\{\{timestamp\}\}/g, toEST(payload.timestamp))
+    .replace(/\{\{zendeskDisplay\}\}/g, payload.zendesk?.display ?? "")
+    .replace(/\{\{zendeskUrl\}\}/g, payload.zendesk?.url ?? "")
+    .replace(/\{\{zendeskUpdated\}\}/g, String(payload.zendesk?.updated ?? false));
 }
 
 function buildAdaptiveCard(payload: NotificationPayload) {
   const color = payload.status === "down" ? "attention" : payload.status === "ssl_expiring" ? "warning" : "good";
   const icon = payload.status === "down" ? "🔴" : payload.status === "ssl_expiring" ? "🟡" : "🟢";
   const estTime = toEST(payload.timestamp);
+  const facts = [
+    { title: "Monitor", value: payload.monitorName },
+    {
+      title: "URL",
+      value: `[${payload.monitorUrl}](${payload.monitorUrl})`,
+    },
+    { title: "Status", value: payload.status.toUpperCase() },
+    { title: "Time", value: estTime },
+    ...(payload.zendesk
+      ? [
+          {
+            title: "Zendesk",
+            value: payload.zendesk.url
+              ? `[${payload.zendesk.display}](${payload.zendesk.url})`
+              : payload.zendesk.display,
+          },
+        ]
+      : []),
+  ];
 
   return {
     type: "message",
@@ -187,15 +219,7 @@ function buildAdaptiveCard(payload: NotificationPayload) {
             },
             {
               type: "FactSet",
-              facts: [
-                { title: "Monitor", value: payload.monitorName },
-                {
-                  title: "URL",
-                  value: `[${payload.monitorUrl}](${payload.monitorUrl})`,
-                },
-                { title: "Status", value: payload.status.toUpperCase() },
-                { title: "Time", value: estTime },
-              ],
+              facts,
             },
             {
               type: "TextBlock",

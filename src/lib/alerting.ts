@@ -4,6 +4,7 @@ import {
   buildRecoveryNotificationPayload,
   dispatchNotificationDetailed,
   type NotificationPayload,
+  type NotificationZendeskMetadata,
   writeDebugLog,
 } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
@@ -132,8 +133,32 @@ function buildDownNotificationPayload(
   };
 }
 
-function buildAlertPayload(event: AlertEventWithIncident): NotificationPayload {
-  switch (event.kind as AlertKind) {
+function buildZendeskTicketUrl(subdomain: string, ticketId: string): string {
+  return `https://${subdomain}.zendesk.com/agent/tickets/${ticketId}`;
+}
+
+function buildRecoveryZendeskMetadata(
+  incident: Pick<IncidentWithAlertState, "zendeskTicketId" | "zendeskRecoveryStatus">,
+  zendeskSubdomain: string
+): NotificationZendeskMetadata {
+  const updated = incident.zendeskRecoveryStatus === "updated";
+
+  return {
+    url: incident.zendeskTicketId && zendeskSubdomain
+      ? buildZendeskTicketUrl(zendeskSubdomain, incident.zendeskTicketId)
+      : null,
+    display: `Zendesk: ${updated ? "✅" : "❌"}`,
+    updated,
+  };
+}
+
+function buildAlertPayload(
+  event: AlertEventWithIncident,
+  zendeskSubdomain: string
+): NotificationPayload {
+  const kind = event.kind as AlertKind;
+
+  switch (kind) {
     case ALERT_KIND_DOWN:
       return buildDownNotificationPayload(event.incident);
     case ALERT_KIND_UP:
@@ -144,15 +169,18 @@ function buildAlertPayload(event: AlertEventWithIncident): NotificationPayload {
         incidentMessage: event.incident.message,
         startedAt: event.incident.startedAt,
         resolvedAt: event.incident.resolvedAt ?? event.scheduledFor,
+        zendesk: buildRecoveryZendeskMetadata(event.incident, zendeskSubdomain),
       });
-    default:
+    default: {
+      const exhaustiveCheck: never = kind;
       return {
         monitorName: event.incident.monitor.name,
         monitorUrl: event.incident.monitor.url,
         status: "up",
-        message: `${event.incident.monitor.name} alert event could not be rendered`,
+        message: `${event.incident.monitor.name} alert event could not be rendered (${exhaustiveCheck})`,
         timestamp: event.scheduledFor.toISOString(),
       };
+    }
   }
 }
 
@@ -228,7 +256,10 @@ async function addZendeskRecoveryUpdate(
     }
   );
 
-  const ticketUrl = `https://${zendeskSettings.subdomain}.zendesk.com/agent/tickets/${incident.zendeskTicketId}`;
+  const ticketUrl = buildZendeskTicketUrl(
+    zendeskSettings.subdomain,
+    incident.zendeskTicketId
+  );
   await writeDebugLog(
     updated ? "zendesk_ticket" : "zendesk_ticket_failed",
     incident.monitor.name,
@@ -498,6 +529,7 @@ export async function resolveOrphanedIncidents(
 }
 
 export async function dispatchPendingAlertEvents(now: Date) {
+  const zendeskSettings = await getZendeskSettings();
   const events: AlertEventWithIncident[] = await prisma.alertEvent.findMany({
     where: {
       status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] },
@@ -559,7 +591,7 @@ export async function dispatchPendingAlertEvents(now: Date) {
       continue;
     }
 
-    const payload = buildAlertPayload(event);
+    const payload = buildAlertPayload(event, zendeskSettings.subdomain);
 
     for (const channel of targetChannels) {
       const delivery = await prisma.alertDelivery.upsert({
@@ -716,7 +748,7 @@ export async function createZendeskTicketsForLongRunningIncidents(
       data: { zendeskTicketId: ticketId },
     });
 
-    const ticketUrl = `https://${zendeskSettings.subdomain}.zendesk.com/agent/tickets/${ticketId}`;
+    const ticketUrl = buildZendeskTicketUrl(zendeskSettings.subdomain, ticketId);
     await writeDebugLog(
       "zendesk_ticket",
       incident.monitor.name,

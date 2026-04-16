@@ -464,7 +464,7 @@ function ChannelForm({
                 className="min-h-[160px] font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">
-                Available placeholders: {"{{monitorName}}"}, {"{{monitorUrl}}"}, {"{{status}}"}, {"{{message}}"}, {"{{timestamp}}"}
+                Available placeholders: {"{{monitorName}}"}, {"{{monitorUrl}}"}, {"{{status}}"}, {"{{message}}"}, {"{{timestamp}}"}, {"{{zendeskDisplay}}"}, {"{{zendeskUrl}}"}, {"{{zendeskUpdated}}"}
               </p>
             </div>
           )}
