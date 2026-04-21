@@ -720,9 +720,6 @@ function DataRetentionSection() {
     mutationFn: async () => {
       const res = await fetch("/api/cron/cleanup", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? "local-dev-secret"}`,
-        },
       });
       if (!res.ok) throw new Error("Cleanup failed");
       return res.json();
@@ -1007,6 +1004,190 @@ function AlertDelaySection() {
               Currently waiting <span className="font-mono font-medium">{displayText}</span> before sending down alerts.
             </p>
           )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function FalseDownProtectionSection() {
+  const queryClient = useQueryClient();
+  const [enabledDraft, setEnabledDraft] = useState<boolean | null>(null);
+  const [minAffectedMonitorsDraft, setMinAffectedMonitorsDraft] = useState<
+    string | null
+  >(null);
+  const [minAffectedPercentDraft, setMinAffectedPercentDraft] = useState<
+    string | null
+  >(null);
+  const [minNetworkErrorPercentDraft, setMinNetworkErrorPercentDraft] = useState<
+    string | null
+  >(null);
+
+  const { data: settings, isLoading } = useQuery<Record<string, string>>({
+    queryKey: ["app-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const enabled =
+    enabledDraft ?? (settings?.falseDownProtectionEnabled !== "false");
+  const minAffectedMonitors =
+    minAffectedMonitorsDraft ??
+    settings?.falseDownProtectionMinAffectedMonitors ??
+    "8";
+  const minAffectedPercent =
+    minAffectedPercentDraft ??
+    String(
+      Math.round(
+        parseFloat(settings?.falseDownProtectionMinAffectedRatio ?? "0.2") * 100
+      )
+    );
+  const minNetworkErrorPercent =
+    minNetworkErrorPercentDraft ??
+    String(
+      Math.round(
+        parseFloat(
+          settings?.falseDownProtectionMinNetworkErrorRatio ?? "0.75"
+        ) * 100
+      )
+    );
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const minAffected = parseInt(minAffectedMonitors || "0", 10);
+      const affectedPercent = parseInt(minAffectedPercent || "0", 10);
+      const networkPercent = parseInt(minNetworkErrorPercent || "0", 10);
+
+      if (isNaN(minAffected) || minAffected < 1) {
+        throw new Error("Minimum affected monitors must be at least 1");
+      }
+
+      if (isNaN(affectedPercent) || affectedPercent < 1 || affectedPercent > 100) {
+        throw new Error("Affected percentage must be between 1 and 100");
+      }
+
+      if (isNaN(networkPercent) || networkPercent < 1 || networkPercent > 100) {
+        throw new Error("Network error percentage must be between 1 and 100");
+      }
+
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          falseDownProtectionEnabled: String(enabled),
+          falseDownProtectionMinAffectedMonitors: String(minAffected),
+          falseDownProtectionMinAffectedRatio: String(affectedPercent / 100),
+          falseDownProtectionMinNetworkErrorRatio: String(networkPercent / 100),
+        }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to save");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success("False down protection updated");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const loaded = !isLoading && settings;
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-medium">False Down Protection</h2>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Mass Failure Safeguard</CardTitle>
+          <CardDescription>
+            Suppresses new down incidents when a large share of monitors flip down
+            with the same checker-side network failure pattern. Raw checks are still
+            recorded.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+            <div className="space-y-1">
+              <p className="font-medium">Enable safeguard</p>
+              <p className="text-sm text-muted-foreground">
+                Keep alerts flowing normally unless a suspicious batch failure is
+                detected.
+              </p>
+            </div>
+            <Switch
+              checked={enabled}
+              onCheckedChange={setEnabledDraft}
+              disabled={isLoading || saveMutation.isPending}
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="false-down-min-affected" className="font-mono">
+                Min affected monitors
+              </Label>
+              <Input
+                id="false-down-min-affected"
+                type="number"
+                min={1}
+                className="font-mono"
+                value={minAffectedMonitors}
+                onChange={(e) => setMinAffectedMonitorsDraft(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="false-down-affected-ratio" className="font-mono">
+                Min affected percentage
+              </Label>
+              <Input
+                id="false-down-affected-ratio"
+                type="number"
+                min={1}
+                max={100}
+                className="font-mono"
+                value={minAffectedPercent}
+                onChange={(e) => setMinAffectedPercentDraft(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="false-down-network-ratio" className="font-mono">
+                Required network-error percentage
+              </Label>
+              <Input
+                id="false-down-network-ratio"
+                type="number"
+                min={1}
+                max={100}
+                className="font-mono"
+                value={minNetworkErrorPercent}
+                onChange={(e) => setMinNetworkErrorPercentDraft(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {loaded
+                ? `Current thresholds: ${minAffectedMonitors} monitor(s), ${minAffectedPercent}% affected, ${minNetworkErrorPercent}% network-style failures.`
+                : "Loading current thresholds..."}
+            </p>
+            <Button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending || isLoading}
+            >
+              {saveMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+              Save
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </>
@@ -2112,6 +2293,12 @@ export default function SettingsPage() {
 
       {/* Alert Delay */}
       <AlertDelaySection />
+
+      {/* Divider */}
+      <div className="border-t border-border" />
+
+      {/* False Down Protection */}
+      <FalseDownProtectionSection />
 
       {/* Divider */}
       <div className="border-t border-border" />

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   dispatchPendingAlertEvents,
   getZendeskSettings,
+  protectDownTransitionsForIncidentCreation,
   queueDueDownAlertEvents,
   recordDownTransitions,
   resolveRecoveryTransitions,
@@ -115,8 +116,13 @@ export async function POST(request: NextRequest) {
   }
 
   const zendeskSettings = await getZendeskSettings();
+  const downProtection = await protectDownTransitionsForIncidentCreation(
+    "manual-check",
+    monitors.length,
+    stateChanges
+  );
 
-  await recordDownTransitions(stateChanges);
+  await recordDownTransitions(downProtection.downTransitionsForIncidents);
 
   if (sendAlerts) {
     await queueDueDownAlertEvents(new Date());
@@ -136,6 +142,7 @@ export async function POST(request: NextRequest) {
     sendAlerts,
     alertsProcessed,
     alertsSent,
+    suppression: downProtection.suppression,
     results: pendingInserts.map((r) => ({
       monitorId: r.monitorId,
       isUp: r.isUp,

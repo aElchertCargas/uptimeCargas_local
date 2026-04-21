@@ -3,6 +3,7 @@ import {
   createZendeskTicketsForLongRunningIncidents,
   dispatchPendingAlertEvents,
   getZendeskSettings,
+  protectDownTransitionsForIncidentCreation,
   queueDueDownAlertEvents,
   recordDownTransitions,
   resolveOrphanedIncidents,
@@ -10,6 +11,7 @@ import {
   type MonitorStateTransition,
 } from "@/lib/alerting";
 import { performCheck, runChecksInBatches } from "@/lib/checker";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { withAdvisoryLock } from "@/lib/postgres-lock";
 import { prisma } from "@/lib/prisma";
 
@@ -25,10 +27,7 @@ interface CheckRecord {
 }
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!(await isAuthorizedCronRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -140,8 +139,13 @@ export async function POST(request: NextRequest) {
     }
 
     const zendeskSettings = await getZendeskSettings();
+    const downProtection = await protectDownTransitionsForIncidentCreation(
+      "cron-check",
+      dueMonitors.length,
+      stateChanges
+    );
 
-    await recordDownTransitions(stateChanges);
+    await recordDownTransitions(downProtection.downTransitionsForIncidents);
     const queuedDown = await queueDueDownAlertEvents(new Date());
     await resolveRecoveryTransitions(stateChanges, zendeskSettings, true);
 
@@ -164,6 +168,7 @@ export async function POST(request: NextRequest) {
       alertsProcessed: alertDispatch.processed,
       alertsSent: alertDispatch.sent,
       zendeskTicketsCreated,
+      suppression: downProtection.suppression,
       results: pendingInserts.map((record) => ({
         monitorId: record.monitorId,
         isUp: record.isUp,

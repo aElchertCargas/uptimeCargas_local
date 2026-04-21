@@ -18,6 +18,24 @@ const ALERT_STATUS_PROCESSING = "processing";
 const ALERT_STATUS_SENT = "sent";
 const ALERT_STATUS_FAILED = "failed";
 const ALERT_STATUS_ABANDONED = "abandoned";
+const FALSE_DOWN_PROTECTION_DEFAULTS = {
+  enabled: true,
+  minAffectedMonitors: 8,
+  minAffectedRatio: 0.2,
+  minNetworkErrorRatio: 0.75,
+} as const;
+const NETWORK_STYLE_FAILURE_PATTERNS = [
+  /fetch failed/i,
+  /timeout/i,
+  /timed out/i,
+  /econnreset/i,
+  /econnrefused/i,
+  /ehostunreach/i,
+  /enotfound/i,
+  /network/i,
+  /socket/i,
+  /tls/i,
+] as const;
 
 type AlertKind = typeof ALERT_KIND_DOWN | typeof ALERT_KIND_UP;
 
@@ -95,6 +113,33 @@ interface ResolveRecoveryOptions {
   emitAlerts: boolean;
   zendeskSettings: ZendeskSettings;
   reason: string;
+}
+
+export interface FalseDownProtectionSettings {
+  enabled: boolean;
+  minAffectedMonitors: number;
+  minAffectedRatio: number;
+  minNetworkErrorRatio: number;
+}
+
+export interface FalseDownSuppressionSummary {
+  enabled: boolean;
+  suppressed: boolean;
+  checkedMonitors: number;
+  downTransitions: number;
+  networkStyleDownTransitions: number;
+  suppressedDownTransitions: number;
+  allowedDownTransitions: number;
+  affectedRatio: number;
+  networkErrorRatio: number;
+  reason: string | null;
+}
+
+export interface FalseDownProtectionResult<
+  TMonitor extends AlertingMonitor = AlertingMonitor,
+> {
+  downTransitionsForIncidents: MonitorStateTransition<TMonitor>[];
+  suppression: FalseDownSuppressionSummary;
 }
 
 type ZendeskRecoveryUpdateResult =
@@ -339,6 +384,154 @@ export async function getAlertDelay(): Promise<number> {
     where: { key: "alertDelaySeconds" },
   });
   return row ? parseInt(row.value, 10) || 300 : 300;
+}
+
+export async function getFalseDownProtectionSettings(): Promise<FalseDownProtectionSettings> {
+  const rows = await prisma.appSetting.findMany({
+    where: {
+      key: {
+        in: [
+          "falseDownProtectionEnabled",
+          "falseDownProtectionMinAffectedMonitors",
+          "falseDownProtectionMinAffectedRatio",
+          "falseDownProtectionMinNetworkErrorRatio",
+        ],
+      },
+    },
+  });
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+
+  const minAffectedMonitors = parseInt(
+    map.get("falseDownProtectionMinAffectedMonitors") ??
+      String(FALSE_DOWN_PROTECTION_DEFAULTS.minAffectedMonitors),
+    10
+  );
+  const minAffectedRatio = parseFloat(
+    map.get("falseDownProtectionMinAffectedRatio") ??
+      String(FALSE_DOWN_PROTECTION_DEFAULTS.minAffectedRatio)
+  );
+  const minNetworkErrorRatio = parseFloat(
+    map.get("falseDownProtectionMinNetworkErrorRatio") ??
+      String(FALSE_DOWN_PROTECTION_DEFAULTS.minNetworkErrorRatio)
+  );
+
+  return {
+    enabled:
+      (map.get("falseDownProtectionEnabled") ?? "true") !== "false",
+    minAffectedMonitors:
+      Number.isFinite(minAffectedMonitors) && minAffectedMonitors > 0
+        ? minAffectedMonitors
+        : FALSE_DOWN_PROTECTION_DEFAULTS.minAffectedMonitors,
+    minAffectedRatio:
+      Number.isFinite(minAffectedRatio) && minAffectedRatio > 0
+        ? Math.min(minAffectedRatio, 1)
+        : FALSE_DOWN_PROTECTION_DEFAULTS.minAffectedRatio,
+    minNetworkErrorRatio:
+      Number.isFinite(minNetworkErrorRatio) && minNetworkErrorRatio > 0
+        ? Math.min(minNetworkErrorRatio, 1)
+        : FALSE_DOWN_PROTECTION_DEFAULTS.minNetworkErrorRatio,
+  };
+}
+
+export function isNetworkStyleFailure(
+  result: Pick<CheckResult, "isUp" | "status" | "message">
+): boolean {
+  if (result.isUp) {
+    return false;
+  }
+
+  if (result.status === 0) {
+    return true;
+  }
+
+  const message = result.message ?? "";
+  return NETWORK_STYLE_FAILURE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+export function evaluateFalseDownProtection<
+  TMonitor extends AlertingMonitor = AlertingMonitor,
+>(
+  checkedMonitors: number,
+  transitions: MonitorStateTransition<TMonitor>[],
+  settings: FalseDownProtectionSettings
+): FalseDownProtectionResult<TMonitor> {
+  const downTransitions = transitions.filter((transition) => !transition.result.isUp);
+  const networkStyleDownTransitions = downTransitions.filter((transition) =>
+    isNetworkStyleFailure(transition.result)
+  );
+  const affectedRatio =
+    checkedMonitors > 0 ? downTransitions.length / checkedMonitors : 0;
+  const networkErrorRatio =
+    downTransitions.length > 0
+      ? networkStyleDownTransitions.length / downTransitions.length
+      : 0;
+
+  let suppressedDownTransitions: MonitorStateTransition<TMonitor>[] = [];
+  let reason: string | null = null;
+
+  if (
+    settings.enabled &&
+    checkedMonitors >= settings.minAffectedMonitors &&
+    downTransitions.length >= settings.minAffectedMonitors &&
+    affectedRatio >= settings.minAffectedRatio &&
+    networkErrorRatio >= settings.minNetworkErrorRatio
+  ) {
+    suppressedDownTransitions = networkStyleDownTransitions;
+    reason =
+      `Suppressed ${suppressedDownTransitions.length} network-style down transition(s) ` +
+      `after ${checkedMonitors} checks; ${downTransitions.length} monitor(s) flipped down ` +
+      `(${(affectedRatio * 100).toFixed(1)}%), ${(networkErrorRatio * 100).toFixed(1)}% ` +
+      `of them matched a checker/network failure pattern.`;
+  }
+
+  const suppressedIds = new Set(
+    suppressedDownTransitions.map((transition) => transition.monitor.id)
+  );
+  const downTransitionsForIncidents = downTransitions.filter(
+    (transition) => !suppressedIds.has(transition.monitor.id)
+  );
+
+  return {
+    downTransitionsForIncidents,
+    suppression: {
+      enabled: settings.enabled,
+      suppressed: suppressedDownTransitions.length > 0,
+      checkedMonitors,
+      downTransitions: downTransitions.length,
+      networkStyleDownTransitions: networkStyleDownTransitions.length,
+      suppressedDownTransitions: suppressedDownTransitions.length,
+      allowedDownTransitions: downTransitionsForIncidents.length,
+      affectedRatio,
+      networkErrorRatio,
+      reason,
+    },
+  };
+}
+
+export async function protectDownTransitionsForIncidentCreation<
+  TMonitor extends AlertingMonitor = AlertingMonitor,
+>(
+  source: string,
+  checkedMonitors: number,
+  transitions: MonitorStateTransition<TMonitor>[]
+): Promise<FalseDownProtectionResult<TMonitor>> {
+  const settings = await getFalseDownProtectionSettings();
+  const result = evaluateFalseDownProtection(
+    checkedMonitors,
+    transitions,
+    settings
+  );
+
+  if (result.suppression.suppressed && result.suppression.reason) {
+    await writeDebugLog(
+      "down_guard",
+      "cycle-guard",
+      null,
+      `${source}: ${result.suppression.reason}`
+    ).catch(() => {});
+  }
+
+  return result;
 }
 
 export async function getZendeskSettings(): Promise<ZendeskSettings> {

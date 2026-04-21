@@ -161,7 +161,12 @@ export function MonitorGrid({ monitors, initialStatusFilter = "all" }: MonitorGr
       return res.json();
     },
     onSuccess: (result) => {
-      toast.success(`Checked ${result.checked} monitor(s)`);
+      const suppressed = result.suppression?.suppressedDownTransitions ?? 0;
+      toast.success(
+        suppressed > 0
+          ? `Checked ${result.checked} monitor(s). Suppressed ${suppressed} suspicious down alert(s).`
+          : `Checked ${result.checked} monitor(s)`
+      );
       exitSelectMode();
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },

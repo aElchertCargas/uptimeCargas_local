@@ -42,13 +42,17 @@ export default function DashboardPage() {
     mutationFn: async () => {
       const res = await fetch("/api/cron/check", {
         method: "POST",
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? "local-dev-secret"}` },
       });
       if (!res.ok) throw new Error("Check cycle failed");
       return res.json();
     },
     onSuccess: (result) => {
-      toast.success(`Checked ${result.checked} monitor(s)`);
+      const suppressed = result.suppression?.suppressedDownTransitions ?? 0;
+      toast.success(
+        suppressed > 0
+          ? `Checked ${result.checked} monitor(s). Suppressed ${suppressed} suspicious down alert(s).`
+          : `Checked ${result.checked} monitor(s)`
+      );
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
     onError: (err) =>

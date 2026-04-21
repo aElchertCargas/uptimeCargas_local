@@ -7,6 +7,7 @@ async function loadModules() {
   const alertingModule = await import("./alerting.ts");
 
   return {
+    evaluateFalseDownProtection: alertingModule.evaluateFalseDownProtection,
     prisma: prismaModule.prisma,
     resolveRecoveryTransitions: alertingModule.resolveRecoveryTransitions,
   };
@@ -194,4 +195,115 @@ test("recovery skips Zendesk when the incident never created a ticket", async ()
     debugLogDelegate.create = originalDebugLogCreate;
     global.fetch = originalFetch;
   }
+});
+
+test("false down protection suppresses mass network-style failures", async () => {
+  const { evaluateFalseDownProtection } = await loadModules();
+
+  const transitions = Array.from({ length: 10 }, (_, index) => ({
+    monitor: {
+      id: `monitor-${index}`,
+      name: `Monitor ${index}`,
+      url: `https://example-${index}.com`,
+    },
+    result: {
+      status: 0,
+      responseTime: 10487,
+      isUp: false,
+      message: "fetch failed",
+    },
+    previouslyUp: true,
+  }));
+
+  const result = evaluateFalseDownProtection(30, transitions, {
+    enabled: true,
+    minAffectedMonitors: 8,
+    minAffectedRatio: 0.2,
+    minNetworkErrorRatio: 0.75,
+  });
+
+  assert.equal(result.suppression.suppressed, true);
+  assert.equal(result.suppression.suppressedDownTransitions, 10);
+  assert.equal(result.suppression.allowedDownTransitions, 0);
+  assert.equal(result.downTransitionsForIncidents.length, 0);
+});
+
+test("false down protection keeps normal smaller outages alertable", async () => {
+  const { evaluateFalseDownProtection } = await loadModules();
+
+  const transitions = Array.from({ length: 3 }, (_, index) => ({
+    monitor: {
+      id: `monitor-${index}`,
+      name: `Monitor ${index}`,
+      url: `https://example-${index}.com`,
+    },
+    result: {
+      status: 0,
+      responseTime: 10487,
+      isUp: false,
+      message: "fetch failed",
+    },
+    previouslyUp: true,
+  }));
+
+  const result = evaluateFalseDownProtection(30, transitions, {
+    enabled: true,
+    minAffectedMonitors: 8,
+    minAffectedRatio: 0.2,
+    minNetworkErrorRatio: 0.75,
+  });
+
+  assert.equal(result.suppression.suppressed, false);
+  assert.equal(result.suppression.suppressedDownTransitions, 0);
+  assert.equal(result.downTransitionsForIncidents.length, 3);
+});
+
+test("false down protection still allows non-network failures through", async () => {
+  const { evaluateFalseDownProtection } = await loadModules();
+
+  const transitions = [
+    ...Array.from({ length: 8 }, (_, index) => ({
+      monitor: {
+        id: `network-${index}`,
+        name: `Network ${index}`,
+        url: `https://network-${index}.com`,
+      },
+      result: {
+        status: 0,
+        responseTime: 10487,
+        isUp: false,
+        message: "fetch failed",
+      },
+      previouslyUp: true,
+    })),
+    ...Array.from({ length: 2 }, (_, index) => ({
+      monitor: {
+        id: `http-${index}`,
+        name: `HTTP ${index}`,
+        url: `https://http-${index}.com`,
+      },
+      result: {
+        status: 503,
+        responseTime: 900,
+        isUp: false,
+        message: "Expected 200/401, got 503",
+      },
+      previouslyUp: true,
+    })),
+  ];
+
+  const result = evaluateFalseDownProtection(30, transitions, {
+    enabled: true,
+    minAffectedMonitors: 8,
+    minAffectedRatio: 0.2,
+    minNetworkErrorRatio: 0.75,
+  });
+
+  assert.equal(result.suppression.suppressed, true);
+  assert.equal(result.suppression.suppressedDownTransitions, 8);
+  assert.equal(result.suppression.allowedDownTransitions, 2);
+  assert.deepEqual(
+    result.downTransitionsForIncidents.map((transition) => transition.monitor.id),
+    ["http-0", "http-1"]
+  );
 });
