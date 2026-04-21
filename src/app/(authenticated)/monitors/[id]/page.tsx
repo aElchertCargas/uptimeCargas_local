@@ -865,7 +865,18 @@ export default function MonitorDetailPage() {
         <div>
           <h1 className="font-mono text-2xl font-semibold">{monitor.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <p className="font-mono text-sm text-muted-foreground">{monitor.url}</p>
+            {isValidUrl(monitor.url) ? (
+              <a
+                href={monitor.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                {monitor.url}
+              </a>
+            ) : (
+              <p className="font-mono text-sm text-muted-foreground">{monitor.url}</p>
+            )}
             <Button
               variant="outline"
               size="sm"
