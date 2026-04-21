@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -36,12 +37,19 @@ interface SyncData {
   toAdd: { customerName: string; publicUrl: string }[];
   toDelete: { id: string; name: string; url: string }[];
   excluded: { customerName: string; publicUrl: string; matchedPattern: string }[];
+  urlMismatches: {
+    id: string;
+    customerName: string;
+    currentUrl: string;
+    syncedUrl: string;
+  }[];
   summary: {
     totalCustomers: number;
     totalMonitors: number;
     toAddCount: number;
     toDeleteCount: number;
     excludedCount: number;
+    urlMismatchCount: number;
   };
 }
 
@@ -67,11 +75,13 @@ export default function SyncPage() {
   const [addSearch, setAddSearch] = useState("");
   const [deleteSearch, setDeleteSearch] = useState("");
   const [excludedSearch, setExcludedSearch] = useState("");
+  const [mismatchSearch, setMismatchSearch] = useState("");
 
   // Sort
   const [addSort, setAddSort] = useState<SortDir>("asc");
   const [deleteSort, setDeleteSort] = useState<SortDir>("asc");
   const [excludedSort, setExcludedSort] = useState<SortDir>("asc");
+  const [mismatchSort, setMismatchSort] = useState<SortDir>("asc");
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<SyncData>({
     queryKey: ["sync"],
@@ -109,6 +119,19 @@ export default function SyncPage() {
       .filter((e) => !q || e.customerName.toLowerCase().includes(q) || e.publicUrl.toLowerCase().includes(q) || e.matchedPattern.toLowerCase().includes(q))
       .sort((a, b) => cmp(a.customerName, b.customerName, excludedSort));
   }, [data, excludedSearch, excludedSort]);
+
+  const filteredUrlMismatches = useMemo(() => {
+    if (!data) return [];
+    const q = mismatchSearch.toLowerCase();
+    return data.urlMismatches
+      .filter((m) =>
+        !q ||
+        m.customerName.toLowerCase().includes(q) ||
+        m.currentUrl.toLowerCase().includes(q) ||
+        m.syncedUrl.toLowerCase().includes(q)
+      )
+      .sort((a, b) => cmp(a.customerName, b.customerName, mismatchSort));
+  }, [data, mismatchSearch, mismatchSort]);
 
   const bulkAddMutation = useMutation({
     mutationFn: async (monitors: { name: string; url: string }[]) => {
@@ -222,7 +245,7 @@ export default function SyncPage() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-2">
             <span className="text-sm text-muted-foreground">API Customers</span>
@@ -252,6 +275,18 @@ export default function SyncPage() {
           <CardContent>
             <span className="font-mono text-2xl font-semibold text-[var(--color-status-down)]">
               {data.summary.toDeleteCount}
+            </span>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <RefreshCw className="size-3.5" /> URL Audit
+            </span>
+          </CardHeader>
+          <CardContent>
+            <span className="font-mono text-2xl font-semibold text-amber-500">
+              {data.summary.urlMismatchCount}
             </span>
           </CardContent>
         </Card>
@@ -351,6 +386,72 @@ export default function SyncPage() {
                 {filteredToAdd.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={3} className="text-center text-muted-foreground py-6">
+                      No matches
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* URL Mismatches */}
+      {data.urlMismatches.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 font-mono text-base">
+              <RefreshCw className="size-4 text-amber-500" />
+              URL Mismatches ({data.urlMismatches.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Search mismatches..."
+                value={mismatchSearch}
+                onChange={(e) => setMismatchSearch(e.target.value)}
+                className="pl-9 font-mono text-sm"
+              />
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    <button
+                      onClick={() => setMismatchSort(toggleSort(mismatchSort))}
+                      className="inline-flex items-center gap-1 font-mono hover:text-foreground transition-colors"
+                    >
+                      Customer
+                      <ArrowUpDown className="size-3" />
+                    </button>
+                  </TableHead>
+                  <TableHead className="font-mono">Current URL</TableHead>
+                  <TableHead className="font-mono">API URL</TableHead>
+                  <TableHead className="w-[1%]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredUrlMismatches.map((mismatch) => (
+                  <TableRow key={mismatch.id}>
+                    <TableCell className="font-medium">{mismatch.customerName}</TableCell>
+                    <TableCell className="max-w-sm truncate font-mono text-xs text-muted-foreground">
+                      {mismatch.currentUrl}
+                    </TableCell>
+                    <TableCell className="max-w-sm truncate font-mono text-xs">
+                      {mismatch.syncedUrl}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/monitors/${mismatch.id}`}>Review</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {filteredUrlMismatches.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-6">
                       No matches
                     </TableCell>
                   </TableRow>
@@ -512,7 +613,10 @@ export default function SyncPage() {
         </Card>
       )}
 
-      {data.toAdd.length === 0 && data.toDelete.length === 0 && data.excluded.length === 0 && (
+      {data.toAdd.length === 0 &&
+        data.toDelete.length === 0 &&
+        data.excluded.length === 0 &&
+        data.urlMismatches.length === 0 && (
         <Card>
           <CardContent className="flex items-center justify-center py-12">
             <p className="text-muted-foreground">

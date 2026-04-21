@@ -7,7 +7,11 @@ interface ApiCustomer {
 }
 
 function normalizeUrl(url: string): string {
-  return url.toLowerCase().replace(/\/+$/, "");
+  return url.trim().toLowerCase().replace(/\/+$/, "");
+}
+
+function normalizeCustomerName(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 function matchesPattern(pattern: string, name: string, url: string): boolean {
@@ -58,14 +62,56 @@ export async function GET() {
 
   const monitorUrlSet = new Set(monitors.map((m) => normalizeUrl(m.url)));
   const customerUrlSet = new Set(validCustomers.map((c) => normalizeUrl(c.publicUrl)));
+  const customerUrlsByName = new Map<string, Map<string, string>>();
+
+  for (const customer of validCustomers) {
+    const customerName = normalizeCustomerName(customer.customerName);
+    const customerUrls = customerUrlsByName.get(customerName) ?? new Map<string, string>();
+
+    customerUrls.set(normalizeUrl(customer.publicUrl), customer.publicUrl);
+    customerUrlsByName.set(customerName, customerUrls);
+  }
 
   const excluded: { customerName: string; publicUrl: string; matchedPattern: string }[] = [];
   const toAdd: { customerName: string; publicUrl: string }[] = [];
+  const urlMismatches: {
+    id: string;
+    customerName: string;
+    currentUrl: string;
+    syncedUrl: string;
+  }[] = [];
+  const mismatchMonitorIds = new Set<string>();
+  const mismatchCustomerNames = new Set<string>();
+
+  for (const monitor of monitors) {
+    const customerUrls = customerUrlsByName.get(normalizeCustomerName(monitor.name));
+
+    if (!customerUrls || customerUrls.has(normalizeUrl(monitor.url))) {
+      continue;
+    }
+
+    const syncedUrl = customerUrls.values().next().value;
+
+    if (!syncedUrl) {
+      continue;
+    }
+
+    urlMismatches.push({
+      id: monitor.id,
+      customerName: monitor.name,
+      currentUrl: monitor.url,
+      syncedUrl,
+    });
+    mismatchMonitorIds.add(monitor.id);
+    mismatchCustomerNames.add(normalizeCustomerName(monitor.name));
+  }
 
   for (const customer of validCustomers) {
     const norm = normalizeUrl(customer.publicUrl);
+    const customerName = normalizeCustomerName(customer.customerName);
 
     if (monitorUrlSet.has(norm)) continue;
+    if (mismatchCustomerNames.has(customerName)) continue;
 
     const match = excludedPatterns.find((p) =>
       matchesPattern(p.pattern, customer.customerName, customer.publicUrl)
@@ -85,18 +131,22 @@ export async function GET() {
     }
   }
 
-  const toDelete = monitors.filter((m) => !customerUrlSet.has(normalizeUrl(m.url)));
+  const toDelete = monitors.filter(
+    (m) => !customerUrlSet.has(normalizeUrl(m.url)) && !mismatchMonitorIds.has(m.id)
+  );
 
   return NextResponse.json({
     toAdd,
     toDelete,
     excluded,
+    urlMismatches,
     summary: {
       totalCustomers: validCustomers.length,
       totalMonitors: monitors.length,
       toAddCount: toAdd.length,
       toDeleteCount: toDelete.length,
       excludedCount: excluded.length,
+      urlMismatchCount: urlMismatches.length,
     },
   });
 }

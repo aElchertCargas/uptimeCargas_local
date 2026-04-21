@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -12,6 +12,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   CalendarIcon,
+  Loader2,
+  Pencil,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -176,6 +178,15 @@ function formatTimeShort(iso: string): string {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getIncidentZendeskBadgeClass(key: IncidentZendeskStatusKey): string {
@@ -678,6 +689,8 @@ export default function MonitorDetailPage() {
   const [chartFilter, setChartFilter] = useState<TimeFilter>({ from: null, to: null });
   const [chartHours, setChartHours] = useState(6);
   const [uptimeDays, setUptimeDays] = useState(7);
+  const [editUrlOpen, setEditUrlOpen] = useState(false);
+  const [editUrl, setEditUrl] = useState("");
 
   const { data: monitor, isLoading } = useQuery<Monitor>({
     queryKey: ["monitor", id],
@@ -749,6 +762,36 @@ export default function MonitorDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [banDialogOpen, setBanDialogOpen] = useState(false);
 
+  const updateUrl = useMutation({
+    mutationFn: async (nextUrl: string) => {
+      const res = await fetch(`/api/monitors/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: nextUrl }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to update URL");
+      }
+
+      return res.json();
+    },
+    onSuccess: (updatedMonitor) => {
+      queryClient.setQueryData(["monitor", id], updatedMonitor);
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["sync"] });
+      setEditUrl(updatedMonitor.url);
+      setEditUrlOpen(false);
+      toast.success("URL updated");
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update URL"
+      );
+    },
+  });
+
   const banAndDelete = useMutation({
     mutationFn: async () => {
       if (!monitor) return;
@@ -785,6 +828,32 @@ export default function MonitorDetailPage() {
     .map((c) => ({ checkedAt: c.checkedAt, responseTime: c.responseTime, isUp: c.isUp }))
     .reverse();
 
+  const handleOpenUrlEditor = () => {
+    setEditUrl(monitor.url);
+    setEditUrlOpen(true);
+  };
+
+  const handleSaveUrl = () => {
+    const nextUrl = editUrl.trim();
+
+    if (!nextUrl) {
+      toast.error("URL is required");
+      return;
+    }
+
+    if (!isValidUrl(nextUrl)) {
+      toast.error("Enter a valid URL");
+      return;
+    }
+
+    if (nextUrl === monitor.url) {
+      setEditUrlOpen(false);
+      return;
+    }
+
+    updateUrl.mutate(nextUrl);
+  };
+
   return (
     <div className="space-y-6">
       <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
@@ -795,7 +864,18 @@ export default function MonitorDetailPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-mono text-2xl font-semibold">{monitor.name}</h1>
-          <p className="font-mono text-sm text-muted-foreground">{monitor.url}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <p className="font-mono text-sm text-muted-foreground">{monitor.url}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              onClick={handleOpenUrlEditor}
+            >
+              <Pencil className="size-3" />
+              Edit URL
+            </Button>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {getStatusBadge(monitor)}
@@ -917,6 +997,44 @@ export default function MonitorDetailPage() {
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={() => { deleteMonitor.mutate(); setDeleteDialogOpen(false); }} disabled={deleteMonitor.isPending}>
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editUrlOpen} onOpenChange={setEditUrlOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update monitored URL</DialogTitle>
+            <DialogDescription>
+              Change the URL for this customer. The next checks will use the new
+              address.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="monitor-url" className="font-mono">
+              URL
+            </Label>
+            <Input
+              id="monitor-url"
+              type="url"
+              value={editUrl}
+              onChange={(e) => setEditUrl(e.target.value)}
+              placeholder="https://example.com/health"
+              className="font-mono"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditUrlOpen(false)}
+              disabled={updateUrl.isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveUrl} disabled={updateUrl.isPending}>
+              {updateUrl.isPending && <Loader2 className="size-4 animate-spin" />}
+              Save URL
             </Button>
           </DialogFooter>
         </DialogContent>
