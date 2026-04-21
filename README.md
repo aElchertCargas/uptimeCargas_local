@@ -12,6 +12,28 @@
 - **Performance**: Materialized stats, batch processing, configurable retention
 - **Dashboard**: Real-time status, uptime graphs, response time charts
 
+## Manual Teams Commit Update
+
+Send a one-off Teams update with the latest local commit, branch state, and optional
+GitHub check status:
+
+```bash
+npm run teams:commit-update
+```
+
+Optional flags:
+
+```bash
+npm run teams:commit-update -- --note "URL audit and inline edit shipped"
+npm run teams:commit-update -- --channel "Engineering"
+npm run teams:commit-update -- --dry-run
+```
+
+Notes:
+- By default the script uses the enabled default Teams notification channel from the database.
+- You can override that with `--channel` or `TEAMS_WEBHOOK_URL`.
+- If `GITHUB_TOKEN` is set, the script also includes GitHub commit check status.
+
 ## Quick Start (Local)
 
 ### 1. Start Postgres
