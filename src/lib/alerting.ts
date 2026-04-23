@@ -237,12 +237,21 @@ async function getTargetChannels(event: AlertEventWithIncident) {
     });
   }
 
-  const downEvent = event.incident.alertEvents.find(
-    (alertEvent) => alertEvent.kind === ALERT_KIND_DOWN
-  );
-  const sentChannelIds = downEvent?.deliveries
-    .filter((delivery) => delivery.sentAt !== null)
-    .map((delivery) => delivery.channelId) ?? [];
+  const downEvent = await prisma.alertEvent.findUnique({
+    where: {
+      incidentId_kind: {
+        incidentId: event.incidentId,
+        kind: ALERT_KIND_DOWN,
+      },
+    },
+    include: {
+      deliveries: true,
+    },
+  });
+  const sentChannelIds =
+    downEvent?.deliveries
+      .filter((delivery) => delivery.sentAt !== null)
+      .map((delivery) => delivery.channelId) ?? [];
 
   if (sentChannelIds.length === 0) {
     return [];
