@@ -126,23 +126,25 @@ export async function runSslCheckCycle(
           result.daysRemaining <= 0
             ? `SSL certificate for ${displayName} has EXPIRED (${expiryDate})`
             : `SSL certificate for ${displayName} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
+        const timestamp = now.toISOString();
+
+        const zendesk = await createZendeskSslTicket(zendeskSettings, {
+          monitorName: monitor.name,
+          monitorUrl: monitor.url,
+          message,
+          timestamp,
+          daysRemaining: result.daysRemaining,
+          expiresAt: result.expiresAt,
+          issuer: result.issuer,
+        });
 
         await sendNotifications({
           monitorName: monitor.name,
           monitorUrl: monitor.url,
           status: "ssl_expiring",
           message,
-          timestamp: now.toISOString(),
-        });
-
-        await createZendeskSslTicket(zendeskSettings, {
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          message,
-          timestamp: now.toISOString(),
-          daysRemaining: result.daysRemaining,
-          expiresAt: result.expiresAt,
-          issuer: result.issuer,
+          timestamp,
+          ...(zendesk ? { zendesk } : {}),
         });
 
         await writeDebugLog(

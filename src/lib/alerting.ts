@@ -984,7 +984,7 @@ export async function createZendeskTicketsForLongRunningIncidents(
 export async function createZendeskSslTicket(
   zendeskSettings: ZendeskSettings,
   payload: ZendeskSslTicketInput
-) {
+): Promise<NotificationZendeskMetadata | null> {
   if (!hasZendeskConfig(zendeskSettings) || !zendeskSettings.sslAlertsEnabled) {
     return null;
   }
@@ -1023,7 +1023,11 @@ export async function createZendeskSslTicket(
       "zendesk",
       `Failed to create Zendesk ticket for SSL alert: ${payload.message}`
     ).catch(() => {});
-    return null;
+    return {
+      url: null,
+      display: "Zendesk: ❌",
+      updated: false,
+    };
   }
 
   const ticketUrl = buildZendeskTicketUrl(zendeskSettings.subdomain, ticketId);
@@ -1034,5 +1038,9 @@ export async function createZendeskSslTicket(
     `Zendesk ticket #${ticketId} created for SSL alert - ${ticketUrl}`
   ).catch(() => {});
 
-  return ticketId;
+  return {
+    url: ticketUrl,
+    display: "Zendesk: ✅",
+    updated: true,
+  };
 }
