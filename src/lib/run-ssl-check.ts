@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import {
+  createZendeskSslTicket,
+  getZendeskSettings,
+} from "@/lib/alerting";
+import {
   checkSslCertificate,
   parseSslTarget,
 } from "@/lib/ssl-checker";
@@ -54,6 +58,7 @@ export async function runSslCheckCycle(
     return target ? [{ monitor, target }] : [];
   });
   const alertDays = await getSslAlertDays();
+  const zendeskSettings = await getZendeskSettings();
   const now = new Date();
   const oneDayAgo = new Date(now.getTime() - 86_400_000);
 
@@ -128,6 +133,16 @@ export async function runSslCheckCycle(
           status: "ssl_expiring",
           message,
           timestamp: now.toISOString(),
+        });
+
+        await createZendeskSslTicket(zendeskSettings, {
+          monitorName: monitor.name,
+          monitorUrl: monitor.url,
+          message,
+          timestamp: now.toISOString(),
+          daysRemaining: result.daysRemaining,
+          expiresAt: result.expiresAt,
+          issuer: result.issuer,
         });
 
         await writeDebugLog(

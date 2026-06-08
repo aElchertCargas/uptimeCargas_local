@@ -11,6 +11,9 @@ export interface ZendeskTicketPayload {
   message: string;
   timestamp: string;
   downtimeMinutes: number;
+  daysRemaining?: number;
+  expiryDate?: string;
+  issuer?: string;
 }
 
 export interface ZendeskRecoveryPayload {
@@ -49,12 +52,37 @@ Error: {{message}}
 
 This ticket was automatically created by the uptime monitor.`;
 
+const DEFAULT_SSL_EXPIRING_SUBJECT_TEMPLATE =
+  "{{monitorName}} - SSL Certificate Expiring";
+
+const DEFAULT_SSL_EXPIRED_SUBJECT_TEMPLATE =
+  "{{monitorName}} - SSL Certificate EXPIRED";
+
+const DEFAULT_SSL_BODY_TEMPLATE = `Monitor: {{monitorName}}
+URL: {{monitorUrl}}
+SSL status: {{message}}
+Certificate expires: {{expiryDate}}
+Days remaining: {{daysRemaining}}
+Issuer: {{issuer}}
+
+This ticket was automatically created by the uptime monitor.`;
+
 export function getDefaultSubjectTemplate() {
   return DEFAULT_SUBJECT_TEMPLATE;
 }
 
 export function getDefaultBodyTemplate() {
   return DEFAULT_BODY_TEMPLATE;
+}
+
+export function getDefaultSslSubjectTemplate(daysRemaining: number) {
+  return daysRemaining <= 0
+    ? DEFAULT_SSL_EXPIRED_SUBJECT_TEMPLATE
+    : DEFAULT_SSL_EXPIRING_SUBJECT_TEMPLATE;
+}
+
+export function getDefaultSslBodyTemplate() {
+  return DEFAULT_SSL_BODY_TEMPLATE;
 }
 
 export function interpolateZendeskTemplate(
@@ -66,7 +94,10 @@ export function interpolateZendeskTemplate(
     .replace(/\{\{monitorUrl\}\}/g, payload.monitorUrl)
     .replace(/\{\{message\}\}/g, payload.message ?? "")
     .replace(/\{\{timestamp\}\}/g, toEST(payload.timestamp))
-    .replace(/\{\{downtimeMinutes\}\}/g, String(payload.downtimeMinutes));
+    .replace(/\{\{downtimeMinutes\}\}/g, String(payload.downtimeMinutes))
+    .replace(/\{\{daysRemaining\}\}/g, String(payload.daysRemaining ?? ""))
+    .replace(/\{\{expiryDate\}\}/g, payload.expiryDate ?? "")
+    .replace(/\{\{issuer\}\}/g, payload.issuer ?? "");
 }
 
 function getZendeskHeaders(config: ZendeskConfig) {
@@ -99,7 +130,8 @@ export async function createZendeskTicket(
   config: ZendeskConfig,
   subjectTemplate: string,
   bodyTemplate: string,
-  payload: ZendeskTicketPayload
+  payload: ZendeskTicketPayload,
+  tags = ["uptime-monitor", "site-down"]
 ): Promise<string | null> {
   try {
     const subject = interpolateZendeskTemplate(subjectTemplate, payload);
@@ -116,7 +148,7 @@ export async function createZendeskTicket(
             comment: { body },
             group_id: parseInt(config.groupId, 10),
             priority: "high",
-            tags: ["uptime-monitor", "site-down"],
+            tags,
             custom_fields: [
               {
                 id: 38842256723213,

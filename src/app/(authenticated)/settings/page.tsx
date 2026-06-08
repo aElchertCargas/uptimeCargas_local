@@ -1884,6 +1884,7 @@ function ZendeskSection() {
   const [delayMinutes, setDelayMinutes] = useState("");
   const [subjectTemplate, setSubjectTemplate] = useState("");
   const [bodyTemplate, setBodyTemplate] = useState("");
+  const [sslAlertsEnabled, setSslAlertsEnabled] = useState(false);
 
   const [groups, setGroups] = useState<{ id: number; name: string }[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
@@ -1904,6 +1905,7 @@ function ZendeskSection() {
     setDelayMinutes(settings.zendeskTicketDelayMinutes ?? "30");
     setSubjectTemplate(settings.zendeskSubjectTemplate ?? DEFAULT_ZENDESK_SUBJECT);
     setBodyTemplate(settings.zendeskBodyTemplate ?? DEFAULT_ZENDESK_BODY);
+    setSslAlertsEnabled(settings.zendeskSslAlertsEnabled === "true");
 
     const sd = settings.zendeskSubdomain ?? "";
     const em = settings.zendeskEmail ?? "";
@@ -2001,6 +2003,10 @@ function ZendeskSection() {
 
   const handleTestTicket = () => testTicketMutation.mutate();
 
+  const hasZendeskCredentials = Boolean(
+    subdomain.trim() && email.trim() && apiToken.trim() && groupId.trim()
+  );
+
   const handleSave = () => {
     const delay = parseInt(delayMinutes, 10);
     if (isNaN(delay) || delay < 1) {
@@ -2018,6 +2024,7 @@ function ZendeskSection() {
       zendeskApiToken: apiToken.trim(),
       zendeskGroupId: groupId.trim(),
       zendeskTicketDelayMinutes: String(delay),
+      zendeskSslAlertsEnabled: String(sslAlertsEnabled),
       zendeskSubjectTemplate: subjectTemplate || DEFAULT_ZENDESK_SUBJECT,
       zendeskBodyTemplate: bodyTemplate || DEFAULT_ZENDESK_BODY,
     });
@@ -2030,9 +2037,9 @@ function ZendeskSection() {
       </div>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Auto-Create Tickets for Prolonged Outages</CardTitle>
+          <CardTitle className="text-base">Auto-Create Zendesk Tickets</CardTitle>
           <CardDescription>
-            Automatically open a Zendesk ticket in the Energy Customer Support group when a site has been down for the configured duration.
+            Automatically open Zendesk tickets for prolonged outages, with an option to also create tickets for SSL certificate expirations.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -2046,6 +2053,23 @@ function ZendeskSection() {
             <Label htmlFor="zendesk-enabled">
               {enabled ? "Zendesk integration enabled" : "Zendesk integration disabled"}
             </Label>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-lg border p-3">
+            <Switch
+              id="zendesk-ssl-alerts-enabled"
+              checked={sslAlertsEnabled}
+              onCheckedChange={setSslAlertsEnabled}
+              disabled={isLoading || !enabled || !hasZendeskCredentials}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="zendesk-ssl-alerts-enabled">
+                Also create tickets for SSL expirations
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                When enabled, opens a Zendesk ticket when a certificate is within the SSL alert threshold configured in SSL Certificate Alerts.
+              </p>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

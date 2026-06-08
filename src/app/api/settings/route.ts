@@ -17,6 +17,7 @@ const DEFAULTS: Record<string, string> = {
   zendeskApiToken: "",
   zendeskGroupId: "",
   zendeskTicketDelayMinutes: "30",
+  zendeskSslAlertsEnabled: "false",
   zendeskSubjectTemplate: "{{monitorName}} is DOWN ({{downtimeMinutes}} min)",
   zendeskBodyTemplate: `Monitor: {{monitorName}}
 URL: {{monitorUrl}}

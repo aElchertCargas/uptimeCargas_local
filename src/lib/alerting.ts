@@ -8,7 +8,12 @@ import {
   writeDebugLog,
 } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
-import { createZendeskTicket, updateZendeskTicket } from "@/lib/zendesk";
+import {
+  createZendeskTicket,
+  getDefaultSslBodyTemplate,
+  getDefaultSslSubjectTemplate,
+  updateZendeskTicket,
+} from "@/lib/zendesk";
 
 const ALERT_KIND_DOWN = "down";
 const ALERT_KIND_UP = "up";
@@ -93,8 +98,19 @@ export interface ZendeskSettings {
   apiToken: string;
   groupId: string;
   delayMinutes: number;
+  sslAlertsEnabled: boolean;
   subjectTemplate: string;
   bodyTemplate: string;
+}
+
+export interface ZendeskSslTicketInput {
+  monitorName: string;
+  monitorUrl: string;
+  message: string;
+  timestamp: string;
+  daysRemaining: number;
+  expiresAt: Date;
+  issuer: string;
 }
 
 export interface AlertingMonitor {
@@ -554,6 +570,7 @@ export async function getZendeskSettings(): Promise<ZendeskSettings> {
           "zendeskApiToken",
           "zendeskGroupId",
           "zendeskTicketDelayMinutes",
+          "zendeskSslAlertsEnabled",
           "zendeskSubjectTemplate",
           "zendeskBodyTemplate",
         ],
@@ -568,6 +585,7 @@ export async function getZendeskSettings(): Promise<ZendeskSettings> {
     apiToken: map.get("zendeskApiToken") ?? "",
     groupId: map.get("zendeskGroupId") ?? "",
     delayMinutes: parseInt(map.get("zendeskTicketDelayMinutes") ?? "30", 10) || 30,
+    sslAlertsEnabled: map.get("zendeskSslAlertsEnabled") === "true",
     subjectTemplate:
       map.get("zendeskSubjectTemplate") ??
       "{{monitorName}} is DOWN ({{downtimeMinutes}} min)",
@@ -961,4 +979,60 @@ export async function createZendeskTicketsForLongRunningIncidents(
   }
 
   return zendeskTicketsCreated;
+}
+
+export async function createZendeskSslTicket(
+  zendeskSettings: ZendeskSettings,
+  payload: ZendeskSslTicketInput
+) {
+  if (!hasZendeskConfig(zendeskSettings) || !zendeskSettings.sslAlertsEnabled) {
+    return null;
+  }
+
+  const expiryDate = payload.expiresAt.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const ticketId = await createZendeskTicket(
+    {
+      subdomain: zendeskSettings.subdomain,
+      email: zendeskSettings.email,
+      apiToken: zendeskSettings.apiToken,
+      groupId: zendeskSettings.groupId,
+    },
+    getDefaultSslSubjectTemplate(payload.daysRemaining),
+    getDefaultSslBodyTemplate(),
+    {
+      monitorName: payload.monitorName,
+      monitorUrl: payload.monitorUrl,
+      message: payload.message,
+      timestamp: payload.timestamp,
+      downtimeMinutes: 0,
+      daysRemaining: payload.daysRemaining,
+      expiryDate,
+      issuer: payload.issuer,
+    },
+    ["uptime-monitor", "ssl-expiring"]
+  );
+
+  if (!ticketId) {
+    await writeDebugLog(
+      "zendesk_ticket_failed",
+      payload.monitorName,
+      "zendesk",
+      `Failed to create Zendesk ticket for SSL alert: ${payload.message}`
+    ).catch(() => {});
+    return null;
+  }
+
+  const ticketUrl = buildZendeskTicketUrl(zendeskSettings.subdomain, ticketId);
+  await writeDebugLog(
+    "zendesk_ticket",
+    payload.monitorName,
+    "zendesk",
+    `Zendesk ticket #${ticketId} created for SSL alert - ${ticketUrl}`
+  ).catch(() => {});
+
+  return ticketId;
 }

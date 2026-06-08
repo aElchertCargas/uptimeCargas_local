@@ -21,6 +21,7 @@ const zendeskSettings: ZendeskSettings = {
   apiToken: "token",
   groupId: "42",
   delayMinutes: 30,
+  sslAlertsEnabled: false,
   subjectTemplate: "{{monitorName}} is DOWN",
   bodyTemplate: "{{message}}",
 };

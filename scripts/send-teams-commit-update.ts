@@ -5,14 +5,8 @@ import "dotenv/config";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import pg from "pg";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../src/generated/prisma/client";
-
-type GitHubStatusState = "success" | "pending" | "failure" | "error" | null;
 
 interface CliOptions {
-  channelName?: string;
   webhookUrl?: string;
   note?: string;
   dryRun: boolean;
@@ -21,7 +15,6 @@ interface CliOptions {
 interface TeamsTarget {
   name: string;
   url: string;
-  headers: Record<string, string>;
 }
 
 interface CommitInfo {
@@ -36,23 +29,11 @@ interface CommitInfo {
   syncState: string;
   repoDisplay: string;
   commitUrl: string | null;
-  compareUrl: string | null;
-  owner: string | null;
-  repo: string | null;
-}
-
-interface GitHubStatusInfo {
-  state: GitHubStatusState;
-  description: string;
-  targetUrl: string | null;
-}
-
-interface TeamsChannelConfig {
-  url?: unknown;
-  headers?: unknown;
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const DEFAULT_TEAMS_WEBHOOK_URL =
+  "https://default8b9e7f0432b8436a85bd570914622b.a3.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/001c39aa96b845faaf095f52433fdd6c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=asaBeO5dkzSBqRCjNa01zjLzwWwVW8kORbs1A-WPEDg";
 
 function runGit(args: string[]): string {
   return execFileSync("git", args, {
@@ -68,10 +49,6 @@ function parseArgs(argv: string[]): CliOptions {
     const arg = argv[i];
 
     switch (arg) {
-      case "--channel":
-        options.channelName = argv[i + 1];
-        i += 1;
-        break;
       case "--webhook-url":
         options.webhookUrl = argv[i + 1];
         i += 1;
@@ -99,24 +76,21 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function printUsage() {
-  console.log(`Manual Teams commit update
+  console.log(`Send the latest git commit to Teams
 
 Usage:
   npm run teams:commit-update
-  npm run teams:commit-update -- --channel "Engineering"
+  npm run teams:commit-update -- --webhook-url "https://..."
   npm run teams:commit-update -- --note "URL audit and inline edit shipped"
   npm run teams:commit-update -- --dry-run
 
 Options:
-  --channel <name>       Use a specific enabled Teams channel from the database
-  --webhook-url <url>    Override the Teams webhook URL instead of reading from the database
-  --note <text>          Append a short manual note for the team update
+  --webhook-url <url>    Override the default Teams webhook URL
+  --note <text>          Append a short note to the Teams message
   --dry-run              Print the payload instead of posting it
 
 Environment:
-  DATABASE_URL           Needed when reading the Teams channel from the database
   TEAMS_WEBHOOK_URL      Optional webhook override
-  GITHUB_TOKEN           Optional GitHub token to include commit check status
 `);
 }
 
@@ -181,9 +155,6 @@ function getCommitInfo(): CommitInfo {
   const commitUrl = parsedRepo
     ? `https://github.com/${parsedRepo.owner}/${parsedRepo.repo}/commit/${fullSha}`
     : null;
-  const compareUrl = parsedRepo
-    ? `https://github.com/${parsedRepo.owner}/${parsedRepo.repo}/commits/${branch}`
-    : null;
 
   return {
     branch,
@@ -197,244 +168,51 @@ function getCommitInfo(): CommitInfo {
     syncState,
     repoDisplay,
     commitUrl,
-    compareUrl,
-    owner: parsedRepo?.owner ?? null,
-    repo: parsedRepo?.repo ?? null,
   };
-}
-
-function cleanHeaders(headers: unknown): Record<string, string> {
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(headers).flatMap(([key, value]) =>
-      typeof value === "string" ? [[key, value]] : []
-    )
-  );
 }
 
 async function getTeamsTarget(options: CliOptions): Promise<TeamsTarget> {
-  if (options.webhookUrl || process.env.TEAMS_WEBHOOK_URL) {
-    return {
-      name: options.channelName ?? "Teams webhook override",
-      url: options.webhookUrl ?? process.env.TEAMS_WEBHOOK_URL!,
-      headers: {},
-    };
-  }
-
-  if (!process.env.DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL is required when using a Teams channel from the database"
-    );
-  }
-
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const prisma = new PrismaClient({
-    adapter: new PrismaPg(pool),
-  });
-
-  try {
-    let channels;
-    try {
-      channels = await prisma.notificationChannel.findMany({
-        where: { type: "teams", enabled: true },
-        orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
-      });
-    } catch (error) {
-      throw new Error(
-        `Failed to load Teams channels from the database: ${
-          error instanceof Error ? error.message : "unknown database error"
-        }`
-      );
-    }
-
-    if (channels.length === 0) {
-      throw new Error("No enabled Teams notification channels found");
-    }
-
-    const selectedChannel = options.channelName
-      ? channels.find((channel) => channel.name === options.channelName)
-      : channels[0];
-
-    if (!selectedChannel) {
-      const available = channels.map((channel) => channel.name).join(", ");
-      throw new Error(
-        `Teams channel "${options.channelName}" not found. Available channels: ${available}`
-      );
-    }
-
-    const config = selectedChannel.config as TeamsChannelConfig;
-    if (typeof config.url !== "string" || !config.url) {
-      throw new Error(`Teams channel "${selectedChannel.name}" is missing a webhook URL`);
-    }
-
-    return {
-      name: selectedChannel.name,
-      url: config.url,
-      headers: cleanHeaders(config.headers),
-    };
-  } finally {
-    await prisma.$disconnect();
-    await pool.end();
-  }
-}
-
-async function getGitHubStatus(commit: CommitInfo): Promise<GitHubStatusInfo | null> {
-  if (!commit.owner || !commit.repo) {
-    return null;
-  }
-
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) {
-    return null;
-  }
-
-  const response = await fetch(
-    `https://api.github.com/repos/${commit.owner}/${commit.repo}/commits/${commit.fullSha}/status`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${token}`,
-        "User-Agent": "uptime-cargas-teams-commit-update",
-      },
-    }
-  );
-
-  if (!response.ok) {
-    return {
-      state: "error",
-      description: `GitHub status lookup failed (${response.status})`,
-      targetUrl: commit.commitUrl,
-    };
-  }
-
-  const data = (await response.json()) as {
-    state?: "success" | "pending" | "failure";
-    statuses?: Array<{ description?: string; target_url?: string | null }>;
-  };
-
-  const state = data.state ?? null;
-  const latestStatus = data.statuses?.[0];
-  const description =
-    latestStatus?.description ??
-    (state === "success"
-      ? "All reported checks passed"
-      : state === "pending"
-        ? "Checks are still running"
-        : state === "failure"
-          ? "At least one reported check failed"
-          : "No commit checks reported");
-
   return {
-    state,
-    description,
-    targetUrl: latestStatus?.target_url ?? commit.commitUrl,
+    name: "Default Teams webhook",
+    url: options.webhookUrl ?? process.env.TEAMS_WEBHOOK_URL ?? DEFAULT_TEAMS_WEBHOOK_URL,
   };
 }
 
-function buildTeamsPayload(
-  commit: CommitInfo,
-  githubStatus: GitHubStatusInfo | null,
-  note?: string
-) {
-  const localState =
-    commit.dirtyFiles === 0
-      ? "Clean working tree"
-      : `${commit.dirtyFiles} uncommitted file(s)`;
-  const githubStatusLabel = githubStatus
-    ? githubStatus.state === "success"
-      ? "Passing"
-      : githubStatus.state === "pending"
-        ? "Pending"
-        : githubStatus.state === "failure"
-          ? "Failing"
-          : "Unavailable"
-    : "Not checked";
-
+function buildTeamsPayload(commit: CommitInfo, note?: string) {
   const facts = [
-    { title: "Repo", value: commit.repoDisplay },
-    { title: "Branch", value: commit.branch },
-    {
-      title: "Commit",
-      value: commit.commitUrl
-        ? `[${commit.shortSha}](${commit.commitUrl})`
-        : commit.shortSha,
-    },
-    { title: "Author", value: commit.author },
     { title: "Committed", value: commit.committedAt },
-    { title: "Git Sync", value: commit.syncState },
-    { title: "Local State", value: localState },
-    { title: "Checks", value: githubStatusLabel },
   ];
 
-  const body = [
+  const body: Array<Record<string, unknown>> = [
+    {
+      type: "TextBlock",
+      text: "👍",
+      horizontalAlignment: "Center",
+    },
     {
       type: "TextBlock",
       size: "Medium",
       weight: "Bolder",
-      text: `Manual commit update: ${commit.branch} @ ${commit.shortSha}`,
-    },
-    {
-      type: "FactSet",
-      facts,
+      text: "Latest commit update",
     },
     {
       type: "TextBlock",
       text: commit.subject,
       wrap: true,
-      spacing: "Medium",
+      spacing: "Small",
+    },
+    {
+      type: "FactSet",
+      facts,
     },
   ];
-
-  if (commit.body) {
-    body.push({
-      type: "TextBlock",
-      text: commit.body,
-      wrap: true,
-      isSubtle: true,
-      spacing: "Small",
-    });
-  }
-
-  if (githubStatus?.description) {
-    body.push({
-      type: "TextBlock",
-      text: `Checks: ${githubStatus.description}`,
-      wrap: true,
-      spacing: "Small",
-    });
-  }
 
   if (note) {
     body.push({
       type: "TextBlock",
-      text: `Team note: ${note}`,
+      text: `Note: ${note}`,
       wrap: true,
       spacing: "Medium",
-    });
-  }
-
-  const actions = [];
-  if (commit.commitUrl) {
-    actions.push({
-      type: "Action.OpenUrl",
-      title: "View Commit",
-      url: commit.commitUrl,
-    });
-  }
-  if (githubStatus?.targetUrl) {
-    actions.push({
-      type: "Action.OpenUrl",
-      title: "View Checks",
-      url: githubStatus.targetUrl,
-    });
-  } else if (commit.compareUrl) {
-    actions.push({
-      type: "Action.OpenUrl",
-      title: "View Branch",
-      url: commit.compareUrl,
     });
   }
 
@@ -448,7 +226,6 @@ function buildTeamsPayload(
           type: "AdaptiveCard",
           version: "1.4",
           body,
-          ...(actions.length > 0 ? { actions } : {}),
         },
       },
     ],
@@ -460,7 +237,6 @@ async function postToTeams(target: TeamsTarget, payload: unknown) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...target.headers,
     },
     body: JSON.stringify(payload),
   });
@@ -478,19 +254,10 @@ async function postToTeams(target: TeamsTarget, payload: unknown) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const commit = getCommitInfo();
-  const githubStatus = await getGitHubStatus(commit);
-  const payload = buildTeamsPayload(commit, githubStatus, options.note);
+  const payload = buildTeamsPayload(commit, options.note);
 
   if (options.dryRun) {
-    let channelName = options.channelName ?? "unresolved";
-
-    try {
-      channelName = (await getTeamsTarget(options)).name;
-    } catch {
-      if (options.webhookUrl || process.env.TEAMS_WEBHOOK_URL) {
-        channelName = options.channelName ?? "Teams webhook override";
-      }
-    }
+    const channelName = (await getTeamsTarget(options)).name;
 
     console.log(
       JSON.stringify(
