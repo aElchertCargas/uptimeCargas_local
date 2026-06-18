@@ -23,11 +23,45 @@ interface RunSslCheckResult {
   total: number;
 }
 
+const ONE_DAY_MS = 86_400_000;
+
 async function getSslAlertDays(): Promise<number> {
   const row = await prisma.appSetting.findUnique({
     where: { key: "sslAlertDays" },
   });
   return row ? parseInt(row.value, 10) || 1 : 1;
+}
+
+function getDaysRemainingAt(expiresAt: Date, checkedAt: Date): number {
+  return Math.floor((expiresAt.getTime() - checkedAt.getTime()) / ONE_DAY_MS);
+}
+
+export function shouldCreateZendeskTicketForSslAlert({
+  alertDays,
+  currentDaysRemaining,
+  currentExpiresAt,
+  previousExpiresAt,
+  previousCheckedAt,
+}: {
+  alertDays: number;
+  currentDaysRemaining: number;
+  currentExpiresAt: Date;
+  previousExpiresAt: Date | null | undefined;
+  previousCheckedAt: Date | null | undefined;
+}): boolean {
+  if (currentDaysRemaining > alertDays) {
+    return false;
+  }
+
+  if (!previousExpiresAt || !previousCheckedAt) {
+    return true;
+  }
+
+  if (previousExpiresAt.toISOString() !== currentExpiresAt.toISOString()) {
+    return true;
+  }
+
+  return getDaysRemainingAt(previousExpiresAt, previousCheckedAt) > alertDays;
 }
 
 async function sendNotifications(payload: NotificationPayload) {
@@ -60,7 +94,7 @@ export async function runSslCheckCycle(
   const alertDays = await getSslAlertDays();
   const zendeskSettings = await getZendeskSettings();
   const now = new Date();
-  const oneDayAgo = new Date(now.getTime() - 86_400_000);
+  const oneDayAgo = new Date(now.getTime() - ONE_DAY_MS);
 
   let checked = 0;
   let alerted = 0;
@@ -128,15 +162,24 @@ export async function runSslCheckCycle(
             : `SSL certificate for ${displayName} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
         const timestamp = now.toISOString();
 
-        const zendesk = await createZendeskSslTicket(zendeskSettings, {
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          message,
-          timestamp,
-          daysRemaining: result.daysRemaining,
-          expiresAt: result.expiresAt,
-          issuer: result.issuer,
+        const shouldCreateZendeskTicket = shouldCreateZendeskTicketForSslAlert({
+          alertDays,
+          currentDaysRemaining: result.daysRemaining,
+          currentExpiresAt: result.expiresAt,
+          previousExpiresAt: monitor.sslExpiresAt,
+          previousCheckedAt: monitor.sslLastCheckedAt,
         });
+        const zendesk = shouldCreateZendeskTicket
+          ? await createZendeskSslTicket(zendeskSettings, {
+              monitorName: monitor.name,
+              monitorUrl: monitor.url,
+              message,
+              timestamp,
+              daysRemaining: result.daysRemaining,
+              expiresAt: result.expiresAt,
+              issuer: result.issuer,
+            })
+          : null;
 
         await sendNotifications({
           monitorName: monitor.name,
