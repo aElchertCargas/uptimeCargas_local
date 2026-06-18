@@ -36,7 +36,7 @@ function getDaysRemainingAt(expiresAt: Date, checkedAt: Date): number {
   return Math.floor((expiresAt.getTime() - checkedAt.getTime()) / ONE_DAY_MS);
 }
 
-export function shouldCreateZendeskTicketForSslAlert({
+export function shouldSendSslAlert({
   alertDays,
   currentDaysRemaining,
   currentExpiresAt,
@@ -141,64 +141,54 @@ export async function runSslCheckCycle(
       },
     });
 
-    if (result.daysRemaining <= alertDays) {
-      const previousExpiry = monitor.sslExpiresAt?.toISOString();
-      const currentExpiry = result.expiresAt.toISOString();
-      const alreadyNotifiedSameCert =
-        previousExpiry === currentExpiry &&
-        monitor.sslLastCheckedAt &&
-        monitor.sslLastCheckedAt > oneDayAgo;
+    if (
+      shouldSendSslAlert({
+        alertDays,
+        currentDaysRemaining: result.daysRemaining,
+        currentExpiresAt: result.expiresAt,
+        previousExpiresAt: monitor.sslExpiresAt,
+        previousCheckedAt: monitor.sslLastCheckedAt,
+      })
+    ) {
+      const expiryDate = result.expiresAt.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
 
-      if (!alreadyNotifiedSameCert) {
-        const expiryDate = result.expiresAt.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        });
+      const message =
+        result.daysRemaining <= 0
+          ? `SSL certificate for ${displayName} has EXPIRED (${expiryDate})`
+          : `SSL certificate for ${displayName} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
+      const timestamp = now.toISOString();
 
-        const message =
-          result.daysRemaining <= 0
-            ? `SSL certificate for ${displayName} has EXPIRED (${expiryDate})`
-            : `SSL certificate for ${displayName} expires in ${result.daysRemaining} day${result.daysRemaining === 1 ? "" : "s"} (${expiryDate})`;
-        const timestamp = now.toISOString();
+      const zendesk = await createZendeskSslTicket(zendeskSettings, {
+        monitorName: monitor.name,
+        monitorUrl: monitor.url,
+        message,
+        timestamp,
+        daysRemaining: result.daysRemaining,
+        expiresAt: result.expiresAt,
+        issuer: result.issuer,
+      });
 
-        const shouldCreateZendeskTicket = shouldCreateZendeskTicketForSslAlert({
-          alertDays,
-          currentDaysRemaining: result.daysRemaining,
-          currentExpiresAt: result.expiresAt,
-          previousExpiresAt: monitor.sslExpiresAt,
-          previousCheckedAt: monitor.sslLastCheckedAt,
-        });
-        const zendesk = shouldCreateZendeskTicket
-          ? await createZendeskSslTicket(zendeskSettings, {
-              monitorName: monitor.name,
-              monitorUrl: monitor.url,
-              message,
-              timestamp,
-              daysRemaining: result.daysRemaining,
-              expiresAt: result.expiresAt,
-              issuer: result.issuer,
-            })
-          : null;
+      await sendNotifications({
+        monitorName: monitor.name,
+        monitorUrl: monitor.url,
+        status: "ssl_expiring",
+        message,
+        timestamp,
+        ...(zendesk ? { zendesk } : {}),
+      });
 
-        await sendNotifications({
-          monitorName: monitor.name,
-          monitorUrl: monitor.url,
-          status: "ssl_expiring",
-          message,
-          timestamp,
-          ...(zendesk ? { zendesk } : {}),
-        });
+      await writeDebugLog(
+        "ssl_expiring",
+        monitor.name,
+        null,
+        message
+      );
 
-        await writeDebugLog(
-          "ssl_expiring",
-          monitor.name,
-          null,
-          message
-        );
-
-        alerted++;
-      }
+      alerted++;
     }
   }
 

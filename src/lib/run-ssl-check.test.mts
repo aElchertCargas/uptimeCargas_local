@@ -8,11 +8,11 @@ async function loadModule() {
 const alertDays = 5;
 const currentExpiresAt = new Date("2026-06-23T12:00:00.000Z");
 
-test("SSL Zendesk tickets are created when a certificate enters the alert threshold", async () => {
-  const { shouldCreateZendeskTicketForSslAlert } = await loadModule();
+test("SSL alerts are sent when a certificate enters the alert threshold", async () => {
+  const { shouldSendSslAlert } = await loadModule();
 
   assert.equal(
-    shouldCreateZendeskTicketForSslAlert({
+    shouldSendSslAlert({
       alertDays,
       currentDaysRemaining: 5,
       currentExpiresAt,
@@ -23,11 +23,11 @@ test("SSL Zendesk tickets are created when a certificate enters the alert thresh
   );
 });
 
-test("SSL Zendesk tickets are not recreated on later days for the same certificate", async () => {
-  const { shouldCreateZendeskTicketForSslAlert } = await loadModule();
+test("SSL alerts are not resent on later days for the same certificate", async () => {
+  const { shouldSendSslAlert } = await loadModule();
 
   assert.equal(
-    shouldCreateZendeskTicketForSslAlert({
+    shouldSendSslAlert({
       alertDays,
       currentDaysRemaining: 4,
       currentExpiresAt,
@@ -38,11 +38,11 @@ test("SSL Zendesk tickets are not recreated on later days for the same certifica
   );
 });
 
-test("SSL Zendesk tickets are created for a new certificate expiry", async () => {
-  const { shouldCreateZendeskTicketForSslAlert } = await loadModule();
+test("SSL alerts are sent for a new certificate expiry", async () => {
+  const { shouldSendSslAlert } = await loadModule();
 
   assert.equal(
-    shouldCreateZendeskTicketForSslAlert({
+    shouldSendSslAlert({
       alertDays,
       currentDaysRemaining: 5,
       currentExpiresAt,
