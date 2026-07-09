@@ -19,6 +19,7 @@ const CONNECTION_TIMEOUT = 10_000;
 const OPENSSL_COMMAND = "openssl";
 const OPENSSL_MISSING_ERROR =
   "OpenSSL CLI is not installed or not available on PATH";
+const SSL_EXCLUDED_DOMAINS = ["silverlinevps.com"];
 
 export async function checkSslCertificate(
   target: SslTarget
@@ -193,6 +194,15 @@ export function parseSslTarget(url: string): SslTarget | null {
   } catch {
     return null;
   }
+}
+
+export function isSslCheckExcludedHost(host: string): boolean {
+  const normalizedHost = host.toLowerCase().replace(/\.$/, "");
+
+  return SSL_EXCLUDED_DOMAINS.some(
+    (domain) =>
+      normalizedHost === domain || normalizedHost.endsWith(`.${domain}`)
+  );
 }
 
 function extractExpiryDate(output: string): Date | null {

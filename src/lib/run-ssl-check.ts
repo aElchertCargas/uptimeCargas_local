@@ -5,6 +5,7 @@ import {
 } from "@/lib/alerting";
 import {
   checkSslCertificate,
+  isSslCheckExcludedHost,
   parseSslTarget,
 } from "@/lib/ssl-checker";
 import {
@@ -89,7 +90,11 @@ export async function runSslCheckCycle(
 
   const httpsMonitors = monitors.flatMap((monitor) => {
     const target = parseSslTarget(monitor.url);
-    return target ? [{ monitor, target }] : [];
+    if (!target || isSslCheckExcludedHost(target.host)) {
+      return [];
+    }
+
+    return [{ monitor, target }];
   });
   const alertDays = await getSslAlertDays();
   const zendeskSettings = await getZendeskSettings();
