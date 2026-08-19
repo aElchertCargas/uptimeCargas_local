@@ -189,6 +189,13 @@ function isValidUrl(url: string): boolean {
   }
 }
 
+function isSslCardExcluded(url: string): boolean {
+  const normalizedUrl = url.toLowerCase();
+  return ["singularis", "silverline"].some((pattern) =>
+    normalizedUrl.includes(pattern)
+  );
+}
+
 function getIncidentZendeskBadgeClass(key: IncidentZendeskStatusKey): string {
   switch (key) {
     case "recovery_posted":
@@ -929,7 +936,7 @@ export default function MonitorDetailPage() {
         </CardContent>
       </Card>
 
-      {monitor.url.startsWith("https://") && (
+      {monitor.url.startsWith("https://") && !isSslCardExcluded(monitor.url) && (
         <SslInfoCard monitor={monitor} />
       )}
 
