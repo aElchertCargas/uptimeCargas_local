@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,6 +13,7 @@ import {
   AlertTriangle,
   ArrowUpDown,
   Search,
+  ExternalLink,
 } from "lucide-react";
 import {
   Card,
@@ -169,6 +169,32 @@ export default function SyncPage() {
       queryClient.invalidateQueries({ queryKey: ["stats"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
+
+  const approveUrlMutation = useMutation({
+    mutationFn: async (mismatch: SyncData["urlMismatches"][number]) => {
+      const res = await fetch(`/api/monitors/${mismatch.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: mismatch.syncedUrl }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to approve URL");
+      }
+
+      return res.json();
+    },
+    onSuccess: (_updatedMonitor, mismatch) => {
+      toast.success(`Updated URL for ${mismatch.customerName}`);
+      queryClient.invalidateQueries({ queryKey: ["sync"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+      queryClient.invalidateQueries({ queryKey: ["monitor", mismatch.id] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to approve URL");
+    },
   });
 
   const handleAddSelected = useCallback(() => {
@@ -442,10 +468,30 @@ export default function SyncPage() {
                     <TableCell className="max-w-sm truncate font-mono text-xs">
                       {mismatch.syncedUrl}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/monitors/${mismatch.id}`}>Review</Link>
-                      </Button>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button asChild variant="outline" size="sm">
+                          <a
+                            href={mismatch.syncedUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            <ExternalLink className="size-4" />
+                            Review
+                          </a>
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => approveUrlMutation.mutate(mismatch)}
+                          disabled={approveUrlMutation.isPending}
+                        >
+                          {approveUrlMutation.isPending &&
+                            approveUrlMutation.variables?.id === mismatch.id && (
+                              <Loader2 className="size-4 animate-spin" />
+                            )}
+                          Approve
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
