@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "npx prisma generate && next build",
-    "start": "next start",
+    "start": "node scripts/prepare-database.mjs && next start",
     "lint": "eslint",
     "test": "NODE_ENV=test tsx --test src/lib/*.test.mts",
     "db:migrate": "npx prisma migrate dev",
