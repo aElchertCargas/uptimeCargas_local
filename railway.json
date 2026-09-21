@@ -4,7 +4,9 @@
     "builder": "RAILPACK"
   },
   "deploy": {
-    "preDeployCommand": ["npx prisma db push"],
+    "preDeployCommand": [
+      "node scripts/prepare-database.mjs && npx prisma db push"
+    ],
     "startCommand": "npm run start",
     "healthcheckPath": "/login",
     "restartPolicyType": "ON_FAILURE",
