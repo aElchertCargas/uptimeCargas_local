@@ -205,7 +205,11 @@ test("dispatcher sends recovery alerts when down and up events are due in the sa
     findMany: (...args: unknown[]) => Promise<unknown[]>;
     findUnique: (...args: unknown[]) => Promise<unknown>;
     updateMany: (args: {
-      where: { id: string; status: { in: string[] } };
+      where: {
+        id: string;
+        status?: { in: string[] };
+        OR?: Array<{ status?: string | { in: string[] } }>;
+      };
       data: { status: string; lastError: null };
     }) => Promise<{ count: number }>;
     update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
@@ -351,9 +355,9 @@ test("dispatcher sends recovery alerts when down and up events are due in the sa
   ];
 
   alertEventDelegate.findMany = async () => events;
-  alertEventDelegate.findUnique = async ({ where }) => {
-    const incidentIdKind = (where as { incidentId_kind?: { incidentId: string; kind: string } })
-      .incidentId_kind;
+  alertEventDelegate.findUnique = async (args) => {
+    const { where } = args as { where: { incidentId_kind?: { incidentId: string; kind: string } } };
+    const incidentIdKind = where.incidentId_kind;
     if (incidentIdKind?.incidentId === "incident-1" && incidentIdKind.kind === "down") {
       return {
         id: "event-down",
@@ -366,7 +370,16 @@ test("dispatcher sends recovery alerts when down and up events are due in the sa
   };
   alertEventDelegate.updateMany = async ({ where, data }) => {
     const currentStatus = eventStatuses.get(where.id);
-    if (!currentStatus || !where.status.in.includes(currentStatus)) {
+    const eligibleStatuses = where.status?.in ?? ["processing"];
+    if (
+      !currentStatus ||
+      (!eligibleStatuses.includes(currentStatus) &&
+        !where.OR?.some((condition: { status?: string | { in: string[] } }) =>
+          typeof condition.status === "string"
+            ? condition.status === currentStatus
+            : condition.status?.in.includes(currentStatus)
+        ))
+    ) {
       return { count: 0 };
     }
 

@@ -11,6 +11,7 @@ model Monitor {
   id               String     @id @default(cuid())
   name             String
   url              String
+  normalizedUrl    String     @unique
   method           String     @default("GET")
   interval         Int        @default(120)
   timeout          Int        @default(48)
@@ -22,6 +23,8 @@ model Monitor {
   lastStatus       Boolean?
   lastResponseTime Int?
   lastCheckedAt    DateTime?
+  suppressedDownAt DateTime?
+  suppressedDownMessage String?
   uptime24h        Float?
   avgResponseTime24h Int?
   // SSL certificate info (populated by daily ssl-check cron)
@@ -85,12 +88,14 @@ model AlertEvent {
   sentAt       DateTime?
   context      Json?
   lastError    String?
+  processingAt DateTime?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   deliveries   AlertDelivery[]
 
   @@unique([incidentId, kind])
   @@index([status, scheduledFor])
+  @@index([status, processingAt])
   @@index([incidentId, createdAt])
 }
 

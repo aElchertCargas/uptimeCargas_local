@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { safeFetch } from "@/lib/safe-fetch";
 
 interface WebhookConfig {
   url: string;
@@ -54,7 +55,7 @@ export async function sendWebhook(
   payload: NotificationPayload
 ): Promise<NotificationDispatchResult> {
   try {
-    const response = await fetch(config.url, {
+    const response = await safeFetch(config.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -98,7 +99,7 @@ export async function sendPushover(
     : `${icon} ${payload.monitorName} is ${payload.status.toUpperCase()}`;
 
   try {
-    const response = await fetch("https://api.pushover.net/1/messages.json", {
+    const response = await safeFetch("https://api.pushover.net/1/messages.json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -251,7 +252,7 @@ export async function sendTeams(
       body = JSON.stringify(buildAdaptiveCard(payload));
     }
 
-    const response = await fetch(config.url, {
+    const response = await safeFetch(config.url, {
       method: "POST",
       headers,
       body,

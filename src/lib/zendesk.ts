@@ -1,3 +1,5 @@
+import { safeFetch } from "@/lib/safe-fetch";
+
 export interface ZendeskConfig {
   subdomain: string;
   email: string;
@@ -137,7 +139,7 @@ export async function createZendeskTicket(
     const subject = interpolateZendeskTemplate(subjectTemplate, payload);
     const body = interpolateZendeskTemplate(bodyTemplate, payload);
 
-    const response = await fetch(
+    const response = await safeFetch(
       `https://${config.subdomain}.zendesk.com/api/v2/tickets.json`,
       {
         method: "POST",
@@ -180,7 +182,7 @@ export async function updateZendeskTicket(
   payload: ZendeskRecoveryPayload
 ): Promise<boolean> {
   try {
-    const response = await fetch(
+    const response = await safeFetch(
       `https://${config.subdomain}.zendesk.com/api/v2/tickets/${ticketId}.json`,
       {
         method: "PUT",

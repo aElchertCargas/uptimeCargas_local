@@ -1,4 +1,5 @@
 import { writeDebugLog } from "@/lib/notifications";
+import { withAdvisoryLock } from "@/lib/postgres-lock";
 import { runCleanupCycle } from "@/lib/run-cleanup";
 import { runSslCheckCycle } from "@/lib/run-ssl-check";
 
@@ -34,7 +35,9 @@ async function runCheckCycle() {
 
 async function runInternalSslCycle() {
   try {
-    const result = await runSslCheckCycle();
+    const lockResult = await withAdvisoryLock(4214003, runSslCheckCycle);
+    if (!lockResult.acquired || !lockResult.result) return;
+    const result = lockResult.result;
     console.log(
       `[scheduler] SSL check completed: checked=${result.checked} alerted=${result.alerted} total=${result.total}`
     );
@@ -48,7 +51,9 @@ async function runInternalSslCycle() {
 
 async function runInternalCleanupCycle() {
   try {
-    const result = await runCleanupCycle();
+    const lockResult = await withAdvisoryLock(4214004, runCleanupCycle);
+    if (!lockResult.acquired || !lockResult.result) return;
+    const result = lockResult.result;
     console.log(
       `[scheduler] Cleanup completed: deleted=${result.deleted} retentionDays=${result.retentionDays}`
     );

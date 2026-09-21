@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 
 const DEFAULTS: Record<string, string> = {
@@ -30,15 +31,22 @@ This ticket was automatically created by the uptime monitor.`,
 };
 
 export async function GET() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const rows = await prisma.appSetting.findMany();
   const settings: Record<string, string> = { ...DEFAULTS };
   for (const row of rows) {
-    settings[row.key] = row.value;
+    settings[row.key] =
+      row.key === "zendeskApiToken" ? (row.value ? "********" : "") : row.value;
   }
   return NextResponse.json(settings);
 }
 
 export async function PUT(request: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const body = await request.json();
 
   const updates: { key: string; value: string }[] = [];
@@ -57,6 +65,9 @@ export async function PUT(request: NextRequest) {
   
   for (const [key, value] of Object.entries(body)) {
     if (typeof value === "string" || typeof value === "number") {
+      if (key === "zendeskApiToken" && (value === "" || value === "********")) {
+        continue;
+      }
       updates.push({ key, value: String(value) });
     }
   }
@@ -82,7 +93,11 @@ export async function PUT(request: NextRequest) {
   const rows = await prisma.appSetting.findMany();
   const settings: Record<string, string> = { ...DEFAULTS };
   for (const row of rows) {
-    settings[row.key] = row.value;
+    if (row.key === "zendeskApiToken") {
+      settings[row.key] = row.value ? "********" : "";
+    } else {
+      settings[row.key] = row.value;
+    }
   }
   return NextResponse.json(settings);
 }

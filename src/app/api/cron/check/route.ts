@@ -129,6 +129,9 @@ export async function POST(request: NextRequest) {
               lastStatus: record.isUp,
               lastResponseTime: record.responseTime,
               lastCheckedAt: new Date(),
+              ...(record.isUp
+                ? { suppressedDownAt: null, suppressedDownMessage: null }
+                : {}),
               uptime24h:
                 total > 0 ? Math.round((upCount / total) * 10000) / 100 : null,
               avgResponseTime24h: stats ? Math.round(stats.avg) : null,
@@ -145,8 +148,41 @@ export async function POST(request: NextRequest) {
       stateChanges
     );
 
-    await recordDownTransitions(downProtection.downTransitionsForIncidents);
-    const queuedDown = await queueDueDownAlertEvents(new Date());
+    const resultByMonitorId = new Map(
+      pendingInserts.map((record) => [record.monitorId, record])
+    );
+    const sustainedSuppressedTransitions = dueMonitors.flatMap((monitor) => {
+      const record = resultByMonitorId.get(monitor.id);
+      if (
+        !record ||
+        record.isUp ||
+        !monitor.suppressedDownAt ||
+        Date.now() - monitor.suppressedDownAt.getTime() < monitor.interval * 1000
+      ) {
+        return [];
+      }
+      return [{ monitor, result: record, previouslyUp: false }];
+    });
+
+    await recordDownTransitions([
+      ...downProtection.downTransitionsForIncidents,
+      ...sustainedSuppressedTransitions,
+    ]);
+    if (downProtection.suppression.suppressed) {
+      await Promise.all(
+        stateChanges
+          .filter((transition) => !transition.result.isUp)
+          .map((transition) =>
+            prisma.monitor.update({
+              where: { id: transition.monitor.id },
+              data: {
+                suppressedDownAt: new Date(),
+                suppressedDownMessage: transition.result.message,
+              },
+            })
+          )
+      );
+    }
     await resolveRecoveryTransitions(stateChanges, zendeskSettings, true);
 
     const recoveredMonitorIds = new Set(
@@ -156,6 +192,7 @@ export async function POST(request: NextRequest) {
     );
     await resolveOrphanedIncidents(zendeskSettings, recoveredMonitorIds);
 
+    const queuedDown = await queueDueDownAlertEvents(new Date());
     const alertDispatch = await dispatchPendingAlertEvents(new Date());
     const zendeskTicketsCreated = await createZendeskTicketsForLongRunningIncidents(
       new Date(),

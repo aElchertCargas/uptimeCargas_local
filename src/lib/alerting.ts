@@ -380,6 +380,18 @@ async function finalizeRecovery(
     return true;
   }
 
+  await prisma.alertEvent.updateMany({
+    where: {
+      incidentId: incident.id,
+      kind: ALERT_KIND_DOWN,
+      status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] },
+    },
+    data: {
+      status: ALERT_STATUS_ABANDONED,
+      lastError: "Incident recovered before the DOWN alert was sent.",
+    },
+  });
+
   const existingUpEvent = await prisma.alertEvent.findUnique({
     where: {
       incidentId_kind: {
@@ -390,13 +402,20 @@ async function finalizeRecovery(
   });
 
   if (!existingUpEvent) {
-    await prisma.alertEvent.create({
-      data: {
-        incidentId: incident.id,
-        kind: ALERT_KIND_UP,
-        status: ALERT_STATUS_PENDING,
-        scheduledFor: resolvedAt,
-        context: { responseTimeMs },
+    await prisma.alertEvent.upsert({
+      where: {
+        incidentId_kind: {
+          incidentId: incident.id,
+          kind: ALERT_KIND_UP,
+        },
+      },
+      update: {},
+      create: {
+          incidentId: incident.id,
+          kind: ALERT_KIND_UP,
+          status: ALERT_STATUS_PENDING,
+          scheduledFor: resolvedAt,
+          context: { responseTimeMs },
       },
     });
   }
@@ -621,9 +640,16 @@ export async function recordDownTransitions(
       continue;
     }
 
-    await prisma.incident.create({
-      data: { monitorId: monitor.id, message: result.message },
-    });
+    try {
+      await prisma.incident.create({
+        data: { monitorId: monitor.id, message: result.message },
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "P2002") {
+        throw error;
+      }
+      continue;
+    }
 
     await writeDebugLog(
       "down",
@@ -649,12 +675,19 @@ export async function queueDueDownAlertEvents(now: Date) {
   });
 
   for (const incident of dueIncidents) {
-    await prisma.alertEvent.create({
-      data: {
-        incidentId: incident.id,
-        kind: ALERT_KIND_DOWN,
-        status: ALERT_STATUS_PENDING,
-        scheduledFor: cutoff,
+    await prisma.alertEvent.upsert({
+      where: {
+        incidentId_kind: {
+          incidentId: incident.id,
+          kind: ALERT_KIND_DOWN,
+        },
+      },
+      update: {},
+      create: {
+          incidentId: incident.id,
+          kind: ALERT_KIND_DOWN,
+          status: ALERT_STATUS_PENDING,
+          scheduledFor: cutoff,
       },
     });
   }
@@ -750,9 +783,13 @@ export async function resolveOrphanedIncidents(
 
 export async function dispatchPendingAlertEvents(now: Date) {
   const zendeskSettings = await getZendeskSettings();
+  const staleProcessingCutoff = new Date(now.getTime() - 5 * 60 * 1000);
   const events: AlertEventWithIncident[] = await prisma.alertEvent.findMany({
     where: {
-      status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] },
+      OR: [
+        { status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] } },
+        { status: ALERT_STATUS_PROCESSING, processingAt: { lt: staleProcessingCutoff } },
+      ],
       scheduledFor: { lte: now },
     },
     include: {
@@ -778,10 +815,14 @@ export async function dispatchPendingAlertEvents(now: Date) {
     const claimResult = await prisma.alertEvent.updateMany({
       where: {
         id: event.id,
-        status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] },
+        OR: [
+          { status: { in: [ALERT_STATUS_PENDING, ALERT_STATUS_FAILED] } },
+          { status: ALERT_STATUS_PROCESSING, processingAt: { lt: staleProcessingCutoff } },
+        ],
       },
       data: {
         status: ALERT_STATUS_PROCESSING,
+        processingAt: now,
         lastError: null,
       },
     });
@@ -805,6 +846,7 @@ export async function dispatchPendingAlertEvents(now: Date) {
         where: { id: event.id },
         data: {
           status: noChannelStatus,
+          processingAt: null,
           lastError: "No eligible notification channels for this alert event.",
         },
       });
@@ -870,6 +912,7 @@ export async function dispatchPendingAlertEvents(now: Date) {
         where: { id: event.id },
         data: {
           status: ALERT_STATUS_SENT,
+          processingAt: null,
           sentAt,
           lastError: null,
         },
@@ -897,6 +940,7 @@ export async function dispatchPendingAlertEvents(now: Date) {
       where: { id: event.id },
       data: {
         status: failedStatus,
+        processingAt: null,
         lastError: failedMessage,
       },
     });

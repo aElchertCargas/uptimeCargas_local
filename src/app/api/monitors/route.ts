@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
+import { validateMonitorInput } from "@/lib/validation";
 
 export async function GET() {
   const monitors = await prisma.monitor.findMany({
@@ -19,25 +21,23 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
 
-  const expectedStatus = Array.isArray(body.expectedStatus)
-    ? body.expectedStatus
-    : body.expectedStatus != null
-      ? [body.expectedStatus]
-      : [200, 401];
+  const body = await request.json();
+  let input;
+  try {
+    input = validateMonitorInput(body);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Invalid monitor" },
+      { status: 400 }
+    );
+  }
 
   const monitor = await prisma.monitor.create({
     data: {
-      name: body.name,
-      url: body.url,
-      method: body.method ?? "GET",
-      interval: body.interval ?? 120,
-      timeout: body.timeout ?? 48,
-      expectedStatus,
-      maxRetries: body.maxRetries ?? 3,
-      active: body.active ?? true,
-      tags: body.tags ?? [],
+      ...input,
     },
   });
 

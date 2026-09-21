@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 
 export interface ZendeskGroup {
   id: number;
@@ -6,6 +7,9 @@ export interface ZendeskGroup {
 }
 
 export async function POST(request: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const body = await request.json().catch(() => ({}));
   const { subdomain, email, apiToken } = body as Record<string, string>;
 

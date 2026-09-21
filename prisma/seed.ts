@@ -2,6 +2,7 @@ import "dotenv/config";
 import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { normalizeMonitorUrl } from "../src/lib/validation";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -23,7 +24,9 @@ async function main() {
       where: { url: monitor.url },
     });
     if (!existing) {
-      await prisma.monitor.create({ data: monitor });
+      await prisma.monitor.create({
+        data: { ...monitor, normalizedUrl: normalizeMonitorUrl(monitor.url) },
+      });
       console.log(`  Created: ${monitor.name}`);
     } else {
       console.log(`  Skipped (exists): ${monitor.name}`);

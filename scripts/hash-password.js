@@ -8,6 +8,7 @@
  *   npm run hash-password yourpassword
  */
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const bcrypt = require("bcryptjs");
 
 const password = process.argv[2];

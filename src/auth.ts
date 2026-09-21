@@ -1,22 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { compare, hash } from "bcryptjs";
+import { compare } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-
-async function ensureDefaultUser() {
-  const count = await prisma.user.count();
-  if (count > 0) return;
-
-  const name = process.env.AUTH_USER_NAME || "admin";
-  const email = process.env.AUTH_USER_EMAIL || "admin@uptimecargas.local";
-  const passwordHash =
-    process.env.AUTH_USER_PASSWORD_HASH ||
-    (await hash("changeme", 10));
-
-  await prisma.user.create({
-    data: { name, email, passwordHash },
-  });
-}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
@@ -31,8 +16,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!credentials?.email || !credentials?.password) {
           return null;
         }
-
-        await ensureDefaultUser();
 
         const user = await prisma.user.findUnique({
           where: { email: (credentials.email as string).toLowerCase() },

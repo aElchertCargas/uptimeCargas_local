@@ -1,3 +1,5 @@
+import { safeFetch } from "@/lib/safe-fetch";
+
 export interface CheckResult {
   status: number;
   responseTime: number;
@@ -16,7 +18,7 @@ async function singleCheck(
   const start = performance.now();
 
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       method,
       signal: controller.signal,
       redirect: "follow",
@@ -68,17 +70,23 @@ export async function performCheck(
 ): Promise<CheckResult> {
   let lastResult: CheckResult | null = null;
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  const attempts = Math.max(1, Math.floor(maxRetries));
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const attemptTimeout = attempt === 0 ? Math.min(FIRST_ATTEMPT_TIMEOUT, timeout) : timeout;
     lastResult = await singleCheck(url, method, attemptTimeout, expectedStatuses);
     if (lastResult.isUp) return lastResult;
 
-    if (attempt < maxRetries - 1) {
+    if (attempt < attempts - 1) {
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     }
   }
 
-  return lastResult!;
+  return lastResult ?? {
+    status: 0,
+    responseTime: 0,
+    isUp: false,
+    message: "No check attempts were configured",
+  };
 }
 
 export async function runChecksInBatches<T>(
@@ -86,11 +94,11 @@ export async function runChecksInBatches<T>(
   fn: (item: T) => Promise<void>,
   concurrency: number = 50
 ): Promise<void> {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
-    while (queue.length > 0) {
-      const item = queue.shift();
-      if (item) await fn(item);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex++];
+      if (item !== undefined) await fn(item);
     }
   });
   await Promise.all(workers);

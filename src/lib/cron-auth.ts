@@ -5,7 +5,7 @@ export async function isAuthorizedCronRequest(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
 
   if (!cronSecret) {
-    return true;
+    return process.env.NODE_ENV !== "production";
   }
 
   const authHeader = request.headers.get("authorization");

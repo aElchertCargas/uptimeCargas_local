@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { createZendeskTicket } from "@/lib/zendesk";
 import { writeDebugLog } from "@/lib/notifications";
@@ -14,6 +15,9 @@ Error: {{message}}
 This ticket was automatically created by the uptime monitor.`;
 
 export async function POST() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const rows = await prisma.appSetting.findMany({
     where: {
       key: {

@@ -1,15 +1,21 @@
 import { NextRequest } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 export const maxDuration = 300; // 5 minutes for SSE connection
 
 export async function GET(request: NextRequest) {
+  if (!(await auth())?.user) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   // Set up SSE headers
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       let lastLogTimestamp: Date | null = null;
       let lastMonitorUpdate: Date = new Date(Date.now() - 5000); // 5 seconds ago
+      let lastHeartbeatAt = Date.now();
 
       const send = (data: object) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
@@ -68,7 +74,7 @@ export async function GET(request: NextRequest) {
         return;
       }
 
-      // Poll for updates every 1 second
+      // Poll for updates every 5 seconds to limit database load per client.
       const interval = setInterval(async () => {
         try {
           // Check for new debug logs
@@ -133,14 +139,14 @@ export async function GET(request: NextRequest) {
             });
           }
 
-          // Send heartbeat every 10 seconds
-          if (Date.now() % 10000 < 1000) {
+          if (Date.now() - lastHeartbeatAt >= 10_000) {
+            lastHeartbeatAt = Date.now();
             send({ type: "heartbeat", timestamp: new Date().toISOString() });
           }
         } catch (error) {
           send({ type: "error", message: error instanceof Error ? error.message : "Unknown error" });
         }
-      }, 1000);
+      }, 5000);
 
       // Cleanup on close
       request.signal.addEventListener("abort", () => {

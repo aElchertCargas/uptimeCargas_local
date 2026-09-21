@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { hash } from "bcryptjs";
 
@@ -6,6 +7,9 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
   const body = await request.json();
   const { name, email, password } = body;
@@ -31,9 +35,9 @@ export async function PUT(
   if (name?.trim()) data.name = name.trim();
   if (email?.trim()) data.email = email.trim().toLowerCase();
   if (password) {
-    if (password.length < 6) {
+    if (password.length < 12) {
       return NextResponse.json(
-        { error: "Password must be at least 6 characters" },
+        { error: "Password must be at least 12 characters" },
         { status: 400 }
       );
     }
@@ -58,6 +62,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
 
   const userCount = await prisma.user.count();

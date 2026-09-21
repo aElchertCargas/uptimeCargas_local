@@ -2,6 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -82,6 +83,12 @@ function LoginForm() {
             Sign In
           </Button>
         </form>
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          First time here?{" "}
+          <Link href="/setup" className="text-primary underline">
+            Create the first account
+          </Link>
+        </p>
       </CardContent>
     </Card>
   );

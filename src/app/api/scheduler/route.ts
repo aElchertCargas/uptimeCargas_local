@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { isSchedulerRunning, startScheduler } from "@/lib/scheduler";
 
 export async function GET() {
@@ -11,6 +12,9 @@ export async function GET() {
 }
 
 export async function POST() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   startScheduler();
 
   return NextResponse.json({

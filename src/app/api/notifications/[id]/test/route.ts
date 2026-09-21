@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api-auth";
 import { prisma } from "@/lib/prisma";
 import { dispatchNotification } from "@/lib/notifications";
 
@@ -6,6 +7,9 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const { id } = await params;
 
   const channel = await prisma.notificationChannel.findUnique({

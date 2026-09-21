@@ -10,50 +10,41 @@ export async function GET() {
   }
 
   try {
-    const [allIncidents, openIncidents] = await Promise.all([
-      prisma.incident.findMany({
-        include: {
-          monitor: {
-            select: { name: true },
-          },
-        },
-        orderBy: { startedAt: "desc" },
-      }),
-      prisma.incident.count({
-        where: { resolvedAt: null },
-      }),
-    ]);
+    const [total, resolved, open, byMonitorRows, resolutionRows, incidents] =
+      await Promise.all([
+        prisma.incident.count(),
+        prisma.incident.count({ where: { resolvedAt: { not: null } } }),
+        prisma.incident.count({ where: { resolvedAt: null } }),
+        prisma.incident.groupBy({
+          by: ["monitorId"],
+          _count: { id: true },
+          orderBy: { _count: { id: "desc" } },
+          take: 10,
+        }),
+        prisma.$queryRaw<Array<{ average_minutes: number | null }>>`
+          SELECT AVG(EXTRACT(EPOCH FROM ("resolvedAt" - "startedAt")) / 60) AS average_minutes
+          FROM "Incident"
+          WHERE "resolvedAt" IS NOT NULL
+        `,
+        prisma.incident.findMany({
+          take: 10,
+          include: { monitor: { select: { name: true } } },
+          orderBy: { startedAt: "desc" },
+        }),
+      ]);
 
-    const resolvedIncidents = allIncidents.filter((i) => i.resolvedAt);
-    const totalResolutionTime = resolvedIncidents.reduce((sum, incident) => {
-      if (incident.resolvedAt) {
-        const duration =
-          (new Date(incident.resolvedAt).getTime() -
-            new Date(incident.startedAt).getTime()) /
-          1000 /
-          60;
-        return sum + duration;
-      }
-      return sum;
-    }, 0);
-
-    const averageResolutionTime =
-      resolvedIncidents.length > 0
-        ? totalResolutionTime / resolvedIncidents.length
-        : 0;
-
-    const monitorCounts = new Map<string, number>();
-    allIncidents.forEach((incident) => {
-      const name = incident.monitor.name;
-      monitorCounts.set(name, (monitorCounts.get(name) || 0) + 1);
+    const monitorIds = byMonitorRows.map((row) => row.monitorId);
+    const monitors = await prisma.monitor.findMany({
+      where: { id: { in: monitorIds } },
+      select: { id: true, name: true },
     });
+    const monitorNames = new Map(monitors.map((monitor) => [monitor.id, monitor.name]));
+    const byMonitor = byMonitorRows.map((row) => ({
+      monitor: monitorNames.get(row.monitorId) ?? row.monitorId,
+      count: row._count.id,
+    }));
 
-    const byMonitor = Array.from(monitorCounts.entries())
-      .map(([monitor, count]) => ({ monitor, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    const recentIncidents = allIncidents.slice(0, 10).map((incident) => {
+    const recentIncidents = incidents.map((incident) => {
       const zendeskStatus = getIncidentZendeskStatus({
         resolvedAt: incident.resolvedAt,
         zendeskTicketId: incident.zendeskTicketId,
@@ -80,10 +71,10 @@ export async function GET() {
     });
 
     return NextResponse.json({
-      total: allIncidents.length,
-      resolved: resolvedIncidents.length,
-      open: openIncidents,
-      averageResolutionTime,
+      total,
+      resolved,
+      open,
+      averageResolutionTime: Number(resolutionRows[0]?.average_minutes ?? 0),
       byUser: [],
       byMonitor,
       recentIncidents,

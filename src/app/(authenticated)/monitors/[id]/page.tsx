@@ -713,7 +713,7 @@ export default function MonitorDetailPage() {
     queryKey: ["monitor-checks-uptime", id, uptimeDays],
     queryFn: async () => {
       const hours = uptimeDays * 24;
-      const res = await fetch(`/api/monitors/${id}/checks?hours=${hours}&limit=500`);
+      const res = await fetch(`/api/monitors/${id}/checks?hours=${hours}&aggregate=true`);
       if (!res.ok) throw new Error("Failed to fetch checks");
       return res.json();
     },
@@ -723,7 +723,7 @@ export default function MonitorDetailPage() {
   const { data: chartChecksData } = useQuery<ChecksResponse>({
     queryKey: ["monitor-checks-chart", id, chartHours],
     queryFn: async () => {
-      const res = await fetch(`/api/monitors/${id}/checks?hours=${chartHours}&limit=500`);
+      const res = await fetch(`/api/monitors/${id}/checks?hours=${chartHours}&aggregate=true`);
       if (!res.ok) throw new Error("Failed to fetch checks");
       return res.json();
     },
